@@ -1,4 +1,4 @@
--- 杰森脚本中心 血债版 - 纯净版（仅透视+伤害跳字）
+-- 杰森脚本中心 血债版 - 纯净透视+跳字（可移动UI + 折叠面板 + 去烟/去阴影）
 local success, err = pcall(function()
 
 -- ================================ 基础服务 ================================
@@ -10,7 +10,8 @@ local Services = {
     HttpService = game:GetService("HttpService"),
     CoreGui = game:GetService("CoreGui"),
     StarterGui = game:GetService("StarterGui"),
-    UserInputService = game:GetService("UserInputService")
+    UserInputService = game:GetService("UserInputService"),
+    Lighting = game:GetService("Lighting")
 }
 
 local LocalPlayer = Services.Players.LocalPlayer
@@ -89,17 +90,17 @@ local GIANT_WEAPON_TO_NAME = {
 local Config = {
     UpdateInterval = 0.5,
     OnlyShowDanger = true,
-    WarnWhenKillerNear = false,
-    WarnDistance = 25,
     HighlightDanger = true,
     HighlightSheriff = true,
     HighlightInnocent = false,
     FilterDeadPlayer = true,
     DamageDisplayEnabled = true,
     SwapWeapons = false,
+    RemoveSmoke = true,       -- 去除烟雾粒子
+    RemoveShadows = true,     -- 移除环境阴影
     UiName = Services.HttpService:GenerateGUID(false):sub(1, 6),
-    UiSize = UDim2.new(0, 280, 0, 300),
-    UiPosition = UDim2.new(0.02, 0, 0.5, -150),
+    UiSize = UDim2.new(0, 280, 0, 340),
+    UiPosition = UDim2.new(0.02, 0, 0.5, -170),
     UiDisplayOrder = 999999,
     RoleConfig = {
         Killer = { Text = "杀手", EnText = "Killer", Color = Color3.fromRGB(225, 45, 45), IsDanger = true, Priority = 1 },
@@ -117,6 +118,7 @@ local PlayerCardCache, PlayerWeaponCache = {}, {}
 local PlayerLastHealth = {}
 local HeadTagCache = {}
 local TotalDamageThisRound = 0
+local DisabledParticles = {}  -- 记录已禁用的粒子对象，用于恢复
 
 -- ================================ 辅助函数 ================================
 local function CleanString(s)
@@ -258,7 +260,7 @@ local function GetPlayerRoleAndWeapon(player)
     return finalRole, foundWeapon, nil
 end
 
--- ================================ 伤害跳字（优化版） ================================
+-- ================================ 优化版伤害跳字 ================================
 local DAMAGE_POOL = {}
 local MAX_DAMAGE_LABELS = 10
 local DAMAGE_DISPLAY_DURATION = 1.2
@@ -358,74 +360,42 @@ local function GetPlayerDistance(player)
     return (myRoot.Position - targetRoot.Position).Magnitude
 end
 
--- ================================ 玩家卡片创建 ================================
-local function CreatePlayerCard(player)
-    if PlayerCardCache[player.UserId] then
-        local cardData = PlayerCardCache[player.UserId]
-        if cardData.Frame and cardData.Frame.Parent == PlayerListContainer then return cardData else PlayerCardCache[player.UserId] = nil end
-    end
-    local orphan = PlayerListContainer:FindFirstChild("Card_" .. player.UserId)
-    if orphan then orphan:Destroy() end
-    local Card = Instance.new("Frame")
-    Card.Name = "Card_" .. player.UserId
-    Card.Size = UDim2.new(1, 0, 0, 42)
-    Card.BackgroundColor3 = Color3.fromRGB(32, 32, 45)
-    Card.BorderSizePixel = 0
-    Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
-    local NameLabel = Instance.new("TextLabel")
-    NameLabel.Size = UDim2.new(0.4, -5, 0, 20)
-    NameLabel.Position = UDim2.new(0, 10, 0, 2)
-    NameLabel.BackgroundTransparency = 1
-    NameLabel.Text = player.Name
-    NameLabel.TextColor3 = Color3.new(1,1,1)
-    NameLabel.TextSize = 11
-    NameLabel.Font = Enum.Font.Gotham
-    NameLabel.TextXAlignment = Enum.TextXAlignment.Left
-    NameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-    NameLabel.Parent = Card
-    local RoleLabel = Instance.new("TextLabel")
-    RoleLabel.Size = UDim2.new(0.5, -10, 0, 20)
-    RoleLabel.Position = UDim2.new(0.5, 0, 0, 2)
-    RoleLabel.BackgroundTransparency = 1
-    RoleLabel.Text = "Loading..."
-    RoleLabel.TextColor3 = Config.RoleConfig.Innocent.Color
-    RoleLabel.TextSize = 11
-    RoleLabel.Font = Enum.Font.GothamBold
-    RoleLabel.TextXAlignment = Enum.TextXAlignment.Right
-    RoleLabel.Parent = Card
-    local WeaponLabel = Instance.new("TextLabel")
-    WeaponLabel.Size = UDim2.new(0.9, -20, 0, 14)
-    WeaponLabel.Position = UDim2.new(0, 10, 0, 24)
-    WeaponLabel.BackgroundTransparency = 1
-    WeaponLabel.Text = ""
-    WeaponLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-    WeaponLabel.TextSize = 9
-    WeaponLabel.Font = Enum.Font.Gotham
-    WeaponLabel.TextXAlignment = Enum.TextXAlignment.Left
-    WeaponLabel.TextTruncate = Enum.TextTruncate.AtEnd
-    WeaponLabel.Parent = Card
-    local DistanceLabel = Instance.new("TextLabel")
-    DistanceLabel.Size = UDim2.new(0.5, -10, 0, 14)
-    DistanceLabel.Position = UDim2.new(0.5, 0, 0, 24)
-    DistanceLabel.BackgroundTransparency = 1
-    DistanceLabel.Text = ""
-    DistanceLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
-    DistanceLabel.TextSize = 9
-    DistanceLabel.Font = Enum.Font.Gotham
-    DistanceLabel.TextXAlignment = Enum.TextXAlignment.Right
-    DistanceLabel.Parent = Card
-    Card.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            local targetRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if Camera and targetRoot then Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position) end
+-- ================================ 优化功能 ================================
+local function ApplyRemoveSmoke()
+    if Config.RemoveSmoke then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") and not DisabledParticles[obj] then
+                local name = obj.Name:lower()
+                if name:find("smoke") or name:find("fire") or name:find("explosion") or name:find("dust") then
+                    if obj.Enabled then
+                        obj.Enabled = false
+                        DisabledParticles[obj] = true
+                    end
+                end
+            end
         end
-    end)
-    Card.Parent = PlayerListContainer
-    PlayerCardCache[player.UserId] = { Frame = Card, NameLabel = NameLabel, WeaponLabel = WeaponLabel, DistanceLabel = DistanceLabel, RoleLabel = RoleLabel, Player = player }
-    return PlayerCardCache[player.UserId]
+    else
+        for obj, _ in pairs(DisabledParticles) do
+            pcall(function() obj.Enabled = true end)
+        end
+        table.clear(DisabledParticles)
+    end
 end
 
--- ================================ UI创建（纯透视界面） ================================
+local function ApplyRemoveShadows()
+    if Config.RemoveShadows then
+        Services.Lighting.GlobalShadows = false
+    else
+        Services.Lighting.GlobalShadows = true
+    end
+end
+
+local function ApplyOptimizations()
+    ApplyRemoveSmoke()
+    ApplyRemoveShadows()
+end
+
+-- ================================ UI创建（折叠面板 + 可移动） ================================
 local function CreateMainUI()
     print("【杰森透视】创建界面")
     ScreenGui = Instance.new("ScreenGui")
@@ -458,6 +428,7 @@ local function CreateMainUI()
     MainCorner.CornerRadius = UDim.new(0, 10)
     MainCorner.Parent = MainFrame
 
+    -- 标题栏（拖动区域）
     local TitleBar = Instance.new("Frame")
     TitleBar.Size = UDim2.new(1, 0, 0, 45)
     TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
@@ -500,7 +471,7 @@ local function CreateMainUI()
     ContentList.SortOrder = Enum.SortOrder.LayoutOrder
     ContentList.Padding = UDim.new(0, 6)
 
-    -- 神探选项（透视设置）
+    -- 折叠面板创建函数
     local function CreateFoldSection(title, buttonsData, defaultOpen)
         local Section = Instance.new("Frame")
         Section.Size = UDim2.new(1, 0, 0, 30)
@@ -552,9 +523,10 @@ local function CreateMainUI()
             task.wait(0.1)
             ContentScroller.CanvasSize = UDim2.new(0,0,0, ContentList.AbsoluteContentSize.Y)
         end)
-        return Section
+        return Section, Content
     end
 
+    -- 透视选项
     CreateFoldSection("🔍 透视选项", {
         { text = Config.OnlyShowDanger and "仅危险目标 : 开" or "仅危险目标 : 关", active = Config.OnlyShowDanger, callback = function(btn)
             Config.OnlyShowDanger = not Config.OnlyShowDanger
@@ -596,6 +568,22 @@ local function CreateMainUI()
             Services.StarterGui:SetCore("SendNotification", { Title = "刷新完成", Text = "已重新扫描全场玩家", Duration = 2 })
         end}
     }, true)
+
+    -- 其他选项（优化）
+    local optSection, optContent = CreateFoldSection("⚙️ 其他选项", {
+        { text = Config.RemoveSmoke and "去除烟雾   : 开" or "去除烟雾   : 关", active = Config.RemoveSmoke, callback = function(btn)
+            Config.RemoveSmoke = not Config.RemoveSmoke
+            btn.Text = Config.RemoveSmoke and "去除烟雾   : 开" or "去除烟雾   : 关"
+            btn.BackgroundColor3 = Config.RemoveSmoke and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+            ApplyRemoveSmoke()
+        end},
+        { text = Config.RemoveShadows and "移除阴影   : 开" or "移除阴影   : 关", active = Config.RemoveShadows, callback = function(btn)
+            Config.RemoveShadows = not Config.RemoveShadows
+            btn.Text = Config.RemoveShadows and "移除阴影   : 开" or "移除阴影   : 关"
+            btn.BackgroundColor3 = Config.RemoveShadows and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+            ApplyRemoveShadows()
+        end}
+    }, false)
 
     -- 伤害跳字开关
     local DamageToggleFrame = Instance.new("Frame")
@@ -679,11 +667,7 @@ local function CreateMainUI()
 
     MainFrame.Parent = ScreenGui
 
-    CloseBtn.MouseButton1Click:Connect(function()
-        ClearOldInstance()
-        pcall(function() ScreenGui:Destroy() end)
-    end)
-
+    -- 可移动实现（整个窗口拖动）
     local dragging = false
     local dragStart, startPos = Vector2.new(), UDim2.new()
     TitleBar.InputBegan:Connect(function(input)
@@ -699,6 +683,11 @@ local function CreateMainUI()
     end)
     Services.UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+
+    CloseBtn.MouseButton1Click:Connect(function()
+        ClearOldInstance()
+        pcall(function() ScreenGui:Destroy() end)
     end)
 
     task.wait(0.5)
@@ -721,11 +710,86 @@ local function ClearOldInstance()
         pcall(function() tagData.Gui:Destroy() end)
     end
     table.clear(HeadTagCache)
+    -- 恢复被禁用的粒子
+    for obj, _ in pairs(DisabledParticles) do
+        pcall(function() obj.Enabled = true end)
+    end
+    table.clear(DisabledParticles)
 end
 ClearOldInstance()
 
+-- ================================ 玩家卡片创建 ================================
+local function CreatePlayerCard(player)
+    if PlayerCardCache[player.UserId] then
+        local cardData = PlayerCardCache[player.UserId]
+        if cardData.Frame and cardData.Frame.Parent == PlayerListContainer then return cardData else PlayerCardCache[player.UserId] = nil end
+    end
+    local orphan = PlayerListContainer:FindFirstChild("Card_" .. player.UserId)
+    if orphan then orphan:Destroy() end
+    local Card = Instance.new("Frame")
+    Card.Name = "Card_" .. player.UserId
+    Card.Size = UDim2.new(1, 0, 0, 42)
+    Card.BackgroundColor3 = Color3.fromRGB(32, 32, 45)
+    Card.BorderSizePixel = 0
+    Instance.new("UICorner", Card).CornerRadius = UDim.new(0, 6)
+    local NameLabel = Instance.new("TextLabel")
+    NameLabel.Size = UDim2.new(0.4, -5, 0, 20)
+    NameLabel.Position = UDim2.new(0, 10, 0, 2)
+    NameLabel.BackgroundTransparency = 1
+    NameLabel.Text = player.Name
+    NameLabel.TextColor3 = Color3.new(1,1,1)
+    NameLabel.TextSize = 11
+    NameLabel.Font = Enum.Font.Gotham
+    NameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    NameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    NameLabel.Parent = Card
+    local RoleLabel = Instance.new("TextLabel")
+    RoleLabel.Size = UDim2.new(0.5, -10, 0, 20)
+    RoleLabel.Position = UDim2.new(0.5, 0, 0, 2)
+    RoleLabel.BackgroundTransparency = 1
+    RoleLabel.Text = "Loading..."
+    RoleLabel.TextColor3 = Config.RoleConfig.Innocent.Color
+    RoleLabel.TextSize = 11
+    RoleLabel.Font = Enum.Font.GothamBold
+    RoleLabel.TextXAlignment = Enum.TextXAlignment.Right
+    RoleLabel.Parent = Card
+    local WeaponLabel = Instance.new("TextLabel")
+    WeaponLabel.Size = UDim2.new(0.9, -20, 0, 14)
+    WeaponLabel.Position = UDim2.new(0, 10, 0, 24)
+    WeaponLabel.BackgroundTransparency = 1
+    WeaponLabel.Text = ""
+    WeaponLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+    WeaponLabel.TextSize = 9
+    WeaponLabel.Font = Enum.Font.Gotham
+    WeaponLabel.TextXAlignment = Enum.TextXAlignment.Left
+    WeaponLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    WeaponLabel.Parent = Card
+    local DistanceLabel = Instance.new("TextLabel")
+    DistanceLabel.Size = UDim2.new(0.5, -10, 0, 14)
+    DistanceLabel.Position = UDim2.new(0.5, 0, 0, 24)
+    DistanceLabel.BackgroundTransparency = 1
+    DistanceLabel.Text = ""
+    DistanceLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+    DistanceLabel.TextSize = 9
+    DistanceLabel.Font = Enum.Font.Gotham
+    DistanceLabel.TextXAlignment = Enum.TextXAlignment.Right
+    DistanceLabel.Parent = Card
+    Card.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local targetRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if Camera and targetRoot then Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position) end
+        end
+    end)
+    Card.Parent = PlayerListContainer
+    PlayerCardCache[player.UserId] = { Frame = Card, NameLabel = NameLabel, WeaponLabel = WeaponLabel, DistanceLabel = DistanceLabel, RoleLabel = RoleLabel, Player = player }
+    return PlayerCardCache[player.UserId]
+end
+
 -- ================================ 核心更新逻辑 ================================
 local function UpdateMainLogic()
+    -- 应用优化（去烟/去阴影）
+    ApplyOptimizations()
+
     local statCount = { Killer = 0, Sheriff = 0, Giant = 0, Innocent = 0 }
     local allPlayers = Services.Players:GetPlayers()
     local visibleCardCount = 0
@@ -749,7 +813,7 @@ local function UpdateMainLogic()
             if card then card.Frame.Visible = false end
         end
 
-        -- 角色高亮
+        -- 高亮
         local shouldHighlight = (Config.HighlightDanger and roleInfo.IsDanger) or (Config.HighlightSheriff and role == "Sheriff") or (Config.HighlightInnocent and role == "Innocent")
         if shouldHighlight and isAlive then
             pcall(function()
@@ -776,7 +840,7 @@ local function UpdateMainLogic()
             end)
         end
 
-        -- 玩家卡片（列表）
+        -- 玩家卡片
         if not (Config.OnlyShowDanger and not roleInfo.IsDanger) then
             local card = CreatePlayerCard(player)
             card.Frame.Visible = true
@@ -801,7 +865,7 @@ local function UpdateMainLogic()
             card.Frame.LayoutOrder = roleInfo.Priority * 1000 + math.floor(dist)
         end
 
-        -- 头顶武器标签（仅杀手/警长）
+        -- 头顶武器标签
         local shouldShowTag = (role == "Killer" or role == "Sheriff") and isAlive and weapon
         if shouldShowTag then
             local tagData = HeadTagCache[player.UserId]
@@ -842,7 +906,6 @@ local function UpdateMainLogic()
         end
     end
 
-    -- 清理离开玩家的标签
     for userId, tagData in pairs(HeadTagCache) do
         if not Services.Players:GetPlayerByUserId(userId) then
             pcall(function() tagData.Gui:Destroy() end)
@@ -863,7 +926,6 @@ local function UpdateMainLogic()
         PlayerListContainer.CanvasSize = UDim2.new(0,0,0, PlayerListContainer.UIListLayout.AbsoluteContentSize.Y)
     end
 
-    -- 清理已离开玩家的卡片
     for userId, card in pairs(PlayerCardCache) do
         if not Services.Players:GetPlayerByUserId(userId) then
             pcall(function() card.Frame:Destroy() end)
@@ -895,6 +957,19 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
     table.clear(PlayerWeaponCache)
 end))
 
+-- 监听新增粒子，自动禁用烟雾
+table.insert(Connections, workspace.DescendantAdded:Connect(function(descendant)
+    if Config.RemoveSmoke and descendant:IsA("ParticleEmitter") then
+        local name = descendant.Name:lower()
+        if name:find("smoke") or name:find("fire") or name:find("explosion") or name:find("dust") then
+            if descendant.Enabled then
+                descendant.Enabled = false
+                DisabledParticles[descendant] = true
+            end
+        end
+    end
+end))
+
 local lastUpdate = 0
 MainLoop = Services.RunService.Heartbeat:Connect(function(deltaTime)
     lastUpdate += deltaTime
@@ -905,6 +980,7 @@ end)
 
 -- 初始化
 CreateMainUI()
+ApplyRemoveShadows() -- 初始应用阴影设置
 print("【杰森透视】纯净版已启动")
 
 end)
