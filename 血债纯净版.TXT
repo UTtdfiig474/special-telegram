@@ -1,4 +1,4 @@
--- 杰森脚本中心 血债版 - 纯净透视+跳字（可移动UI + 折叠面板 + 去烟/去阴影）
+-- 杰森脚本中心 血债版 - 纯净透视+跳字（窗口折叠 + 杀手目标透视 + 去烟/去阴影）
 local success, err = pcall(function()
 
 -- ================================ 基础服务 ================================
@@ -96,8 +96,9 @@ local Config = {
     FilterDeadPlayer = true,
     DamageDisplayEnabled = true,
     SwapWeapons = false,
-    RemoveSmoke = true,       -- 去除烟雾粒子
-    RemoveShadows = true,     -- 移除环境阴影
+    RemoveSmoke = true,
+    RemoveShadows = true,
+    ShowKillerTarget = true,  -- 显示杀手目标
     UiName = Services.HttpService:GenerateGUID(false):sub(1, 6),
     UiSize = UDim2.new(0, 280, 0, 340),
     UiPosition = UDim2.new(0.02, 0, 0.5, -170),
@@ -112,13 +113,15 @@ local Config = {
 }
 
 -- ================================ 全局变量 ================================
-local ScreenGui, MainFrame, PlayerListContainer, StatLabel, EmptyTipLabel, DamageStatLabel
+local ScreenGui, MainFrame, ContentScroller, PlayerListContainer, StatLabel, EmptyTipLabel, DamageStatLabel
 local MainLoop, Connections = {}, {}
 local PlayerCardCache, PlayerWeaponCache = {}, {}
 local PlayerLastHealth = {}
 local HeadTagCache = {}
 local TotalDamageThisRound = 0
-local DisabledParticles = {}  -- 记录已禁用的粒子对象，用于恢复
+local DisabledParticles = {}
+local isMinimized = false
+local MinimizeBtn = nil  -- 最小化按钮
 
 -- ================================ 辅助函数 ================================
 local function CleanString(s)
@@ -395,7 +398,7 @@ local function ApplyOptimizations()
     ApplyRemoveShadows()
 end
 
--- ================================ UI创建（折叠面板 + 可移动） ================================
+-- ================================ UI创建（窗口可折叠 + 内部折叠面板） ================================
 local function CreateMainUI()
     print("【杰森透视】创建界面")
     ScreenGui = Instance.new("ScreenGui")
@@ -436,7 +439,7 @@ local function CreateMainUI()
     TitleBar.Parent = MainFrame
 
     local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -50, 1, 0)
+    TitleLabel.Size = UDim2.new(1, -90, 1, 0)
     TitleLabel.Position = UDim2.new(0, 15, 0, 0)
     TitleLabel.BackgroundTransparency = 1
     TitleLabel.Text = "杰森透视 纯净版"
@@ -445,6 +448,17 @@ local function CreateMainUI()
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     TitleLabel.Parent = TitleBar
+
+    -- 最小化按钮
+    MinimizeBtn = Instance.new("TextButton")
+    MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+    MinimizeBtn.Position = UDim2.new(1, -70, 0.5, -15)
+    MinimizeBtn.Text = "—"
+    MinimizeBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+    MinimizeBtn.TextColor3 = Color3.new(1,1,1)
+    MinimizeBtn.Font = Enum.Font.GothamBold
+    Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 6)
+    MinimizeBtn.Parent = TitleBar
 
     local CloseBtn = Instance.new("TextButton")
     CloseBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -456,7 +470,7 @@ local function CreateMainUI()
     Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
     CloseBtn.Parent = TitleBar
 
-    local ContentScroller = Instance.new("ScrollingFrame")
+    ContentScroller = Instance.new("ScrollingFrame")
     ContentScroller.Size = UDim2.new(1, 0, 1, -45)
     ContentScroller.Position = UDim2.new(0, 0, 0, 45)
     ContentScroller.BackgroundTransparency = 1
@@ -552,6 +566,11 @@ local function CreateMainUI()
             btn.Text = Config.HighlightInnocent and "平民高亮   : 开" or "平民高亮   : 关"
             btn.BackgroundColor3 = Config.HighlightInnocent and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
         end},
+        { text = Config.ShowKillerTarget and "杀手目标   : 开" or "杀手目标   : 关", active = Config.ShowKillerTarget, callback = function(btn)
+            Config.ShowKillerTarget = not Config.ShowKillerTarget
+            btn.Text = Config.ShowKillerTarget and "杀手目标   : 开" or "杀手目标   : 关"
+            btn.BackgroundColor3 = Config.ShowKillerTarget and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+        end},
         { text = Config.SwapWeapons and "交换武器池 : 开" or "交换武器池 : 关", active = Config.SwapWeapons, callback = function(btn)
             Config.SwapWeapons = not Config.SwapWeapons
             btn.Text = Config.SwapWeapons and "交换武器池 : 开" or "交换武器池 : 关"
@@ -569,8 +588,8 @@ local function CreateMainUI()
         end}
     }, true)
 
-    -- 其他选项（优化）
-    local optSection, optContent = CreateFoldSection("⚙️ 其他选项", {
+    -- 其他选项
+    CreateFoldSection("⚙️ 其他选项", {
         { text = Config.RemoveSmoke and "去除烟雾   : 开" or "去除烟雾   : 关", active = Config.RemoveSmoke, callback = function(btn)
             Config.RemoveSmoke = not Config.RemoveSmoke
             btn.Text = Config.RemoveSmoke and "去除烟雾   : 开" or "去除烟雾   : 关"
@@ -685,6 +704,20 @@ local function CreateMainUI()
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
 
+    -- 最小化/最大化切换
+    MinimizeBtn.MouseButton1Click:Connect(function()
+        isMinimized = not isMinimized
+        if isMinimized then
+            MainFrame:TweenSize(UDim2.new(0, 280, 0, 45), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+            ContentScroller.Visible = false
+            MinimizeBtn.Text = "+"
+        else
+            MainFrame:TweenSize(Config.UiSize, Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.2, true)
+            ContentScroller.Visible = true
+            MinimizeBtn.Text = "—"
+        end
+    end)
+
     CloseBtn.MouseButton1Click:Connect(function()
         ClearOldInstance()
         pcall(function() ScreenGui:Destroy() end)
@@ -704,13 +737,13 @@ local function ClearOldInstance()
         pcall(function()
             local char = player.Character
             if char and char:FindFirstChild("DetectorHighlight") then char.DetectorHighlight:Destroy() end
+            if char and char:FindFirstChild("KillerTarget") then char.KillerTarget:Destroy() end
         end)
     end
     for _, tagData in pairs(HeadTagCache) do
         pcall(function() tagData.Gui:Destroy() end)
     end
     table.clear(HeadTagCache)
-    -- 恢复被禁用的粒子
     for obj, _ in pairs(DisabledParticles) do
         pcall(function() obj.Enabled = true end)
     end
@@ -785,10 +818,62 @@ local function CreatePlayerCard(player)
     return PlayerCardCache[player.UserId]
 end
 
+-- ================================ 杀手目标透视 ================================
+local function UpdateKillerTarget()
+    -- 清除所有角色上的杀手目标标记
+    for _, plr in pairs(Services.Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("KillerTarget") then
+            plr.Character.KillerTarget:Destroy()
+        end
+    end
+    if not Config.ShowKillerTarget then return end
+
+    -- 寻找所有杀手
+    for _, plr in pairs(Services.Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        local role = GetPlayerRoleAndWeapon(plr)
+        if role == "Killer" and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+            local killerRoot = plr.Character.HumanoidRootPart
+            local killerHead = plr.Character:FindFirstChild("Head")
+            local lookVector = killerHead and killerHead.CFrame.LookVector or killerRoot.CFrame.LookVector
+            -- 检查杀手前方最近的非杀手玩家
+            local bestTarget = nil
+            local bestDot = 0.98 -- 近似准星角度
+            for _, targetPlr in pairs(Services.Players:GetPlayers()) do
+                if targetPlr ~= plr and targetPlr.Character and targetPlr.Character:FindFirstChild("HumanoidRootPart") then
+                    local targetRoot = targetPlr.Character.HumanoidRootPart
+                    local toTarget = (targetRoot.Position - killerRoot.Position).Unit
+                    local dot = lookVector:Dot(toTarget)
+                    if dot > bestDot then
+                        bestDot = dot
+                        bestTarget = targetPlr
+                    end
+                end
+            end
+            if bestTarget and bestTarget.Character then
+                -- 给目标添加红色高亮
+                local char = bestTarget.Character
+                local hl = char:FindFirstChild("KillerTarget")
+                if not hl then
+                    hl = Instance.new("Highlight")
+                    hl.Name = "KillerTarget"
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.OutlineColor = Color3.fromRGB(255, 0, 0)
+                    hl.FillColor = Color3.fromRGB(255, 0, 0)
+                    hl.OutlineTransparency = 0
+                    hl.FillTransparency = 0.5
+                    hl.Parent = char
+                end
+                break -- 目前只标记一个杀手的目标（可扩展）
+            end
+        end
+    end
+end
+
 -- ================================ 核心更新逻辑 ================================
 local function UpdateMainLogic()
-    -- 应用优化（去烟/去阴影）
     ApplyOptimizations()
+    UpdateKillerTarget()
 
     local statCount = { Killer = 0, Sheriff = 0, Giant = 0, Innocent = 0 }
     local allPlayers = Services.Players:GetPlayers()
@@ -957,7 +1042,6 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
     table.clear(PlayerWeaponCache)
 end))
 
--- 监听新增粒子，自动禁用烟雾
 table.insert(Connections, workspace.DescendantAdded:Connect(function(descendant)
     if Config.RemoveSmoke and descendant:IsA("ParticleEmitter") then
         local name = descendant.Name:lower()
@@ -978,9 +1062,8 @@ MainLoop = Services.RunService.Heartbeat:Connect(function(deltaTime)
     pcall(UpdateMainLogic)
 end)
 
--- 初始化
 CreateMainUI()
-ApplyRemoveShadows() -- 初始应用阴影设置
+ApplyRemoveShadows()
 print("【杰森透视】纯净版已启动")
 
 end)
