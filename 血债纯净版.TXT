@@ -1,4 +1,4 @@
--- 杰森脚本中心 血债版 - 纯净透视+跳字（窗口折叠 + 杀手目标透视 + 去烟/去阴影）
+-- 杰森脚本中心 血债版 - 纯净透视+自瞄（窗口折叠 + 杀手目标透视 + 伤害跳字）
 local success, err = pcall(function()
 
 -- ================================ 基础服务 ================================
@@ -10,8 +10,7 @@ local Services = {
     HttpService = game:GetService("HttpService"),
     CoreGui = game:GetService("CoreGui"),
     StarterGui = game:GetService("StarterGui"),
-    UserInputService = game:GetService("UserInputService"),
-    Lighting = game:GetService("Lighting")
+    UserInputService = game:GetService("UserInputService")
 }
 
 local LocalPlayer = Services.Players.LocalPlayer
@@ -96,9 +95,22 @@ local Config = {
     FilterDeadPlayer = true,
     DamageDisplayEnabled = true,
     SwapWeapons = false,
-    RemoveSmoke = true,
-    RemoveShadows = true,
-    ShowKillerTarget = true,  -- 显示杀手目标
+    ShowKillerTarget = true,
+
+    -- 自瞄配置
+    AimbotEnabled = true,
+    AimbotSmoothness = 0.12,
+    AimbotStrength = 1.0,
+    AimbotTargetPart = "Head",
+    AimbotFOV = 120,
+    AimbotMaxDistance = 300,
+    AimbotWallCheck = false,
+    AimbotFilterRoles = {Killer = true, Sheriff = true, Giant = true, Innocent = true},
+    NoRecoilEnabled = true,
+    RecoilLockDuration = 0.15,
+    FOVCircleEnabled = false,
+    FOVCircleAngle = 60,
+
     UiName = Services.HttpService:GenerateGUID(false):sub(1, 6),
     UiSize = UDim2.new(0, 280, 0, 340),
     UiPosition = UDim2.new(0.02, 0, 0.5, -170),
@@ -119,9 +131,15 @@ local PlayerCardCache, PlayerWeaponCache = {}, {}
 local PlayerLastHealth = {}
 local HeadTagCache = {}
 local TotalDamageThisRound = 0
-local DisabledParticles = {}
 local isMinimized = false
-local MinimizeBtn = nil  -- 最小化按钮
+local MinimizeBtn = nil
+
+-- 自瞄/无后坐力全局变量
+local AimbotConnection = nil
+local RecoilConnection = nil
+local RecoilOriginCF = nil
+local RecoilLockUntil = 0
+local FovCircleGui, FovCircleFrame = nil, nil
 
 -- ================================ 辅助函数 ================================
 local function CleanString(s)
@@ -363,42 +381,169 @@ local function GetPlayerDistance(player)
     return (myRoot.Position - targetRoot.Position).Magnitude
 end
 
--- ================================ 优化功能 ================================
-local function ApplyRemoveSmoke()
-    if Config.RemoveSmoke then
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("ParticleEmitter") and not DisabledParticles[obj] then
-                local name = obj.Name:lower()
-                if name:find("smoke") or name:find("fire") or name:find("explosion") or name:find("dust") then
-                    if obj.Enabled then
-                        obj.Enabled = false
-                        DisabledParticles[obj] = true
+-- ================================ 自瞄系统 ================================
+local function GetBodyPart(char, partType)
+    if partType == "Head" then return char:FindFirstChild("Head")
+    elseif partType == "Torso" then return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+    elseif partType == "Legs" then return char:FindFirstChild("LeftLeg") or char:FindFirstChild("RightLeg") or char:FindFirstChild("HumanoidRootPart")
+    end
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetCurrentMaxRadius()
+    if not Camera then return 0 end
+    local angleUsed = Config.FOVCircleEnabled and Config.FOVCircleAngle or Config.AimbotFOV
+    local fovRad = math.rad(angleUsed / 2)
+    local camFovRad = math.rad(Camera.FieldOfView / 2)
+    return (Camera.ViewportSize.Y / 2) * math.tan(fovRad) / math.tan(camFovRad)
+end
+
+local function GetBestTarget()
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not Camera then return nil end
+    local maxRadius = GetCurrentMaxRadius()
+    if maxRadius <= 0 then return nil end
+
+    local bestTarget = nil
+    local bestScore = math.huge
+    for _, player in ipairs(Services.Players:GetPlayers()) do
+        if player ~= LocalPlayer and IsPlayerAlive(player) then
+            local char = player.Character
+            if char then
+                local role = GetPlayerRoleAndWeapon(player)
+                if Config.AimbotFilterRoles and not Config.AimbotFilterRoles[role] then continue end
+
+                local targetPart = GetBodyPart(char, Config.AimbotTargetPart)
+                if targetPart then
+                    local targetPos = targetPart.Position
+                    local dist = (myRoot.Position - targetPos).Magnitude
+                    if dist > Config.AimbotMaxDistance then continue end
+
+                    if not Config.AimbotWallCheck then
+                        local ray = Ray.new(myRoot.Position, (targetPos - myRoot.Position).Unit * dist)
+                        local hit = workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character})
+                        if hit then
+                            local hitModel = hit:FindFirstAncestorOfClass("Model")
+                            if hitModel ~= char then continue end
+                        end
+                    end
+
+                    local screenPoint, onScreen = Camera:WorldToScreenPoint(targetPos)
+                    if not onScreen then continue end
+                    local screenCenter = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                    local screenDist = (Vector2.new(screenPoint.X, screenPoint.Y) - screenCenter).Magnitude
+                    if screenDist > maxRadius then continue end
+                    if dist < bestScore then
+                        bestScore = dist
+                        bestTarget = targetPart
                     end
                 end
             end
         end
-    else
-        for obj, _ in pairs(DisabledParticles) do
-            pcall(function() obj.Enabled = true end)
+    end
+    return bestTarget
+end
+
+local function StartAimbot()
+    if AimbotConnection then return end
+    AimbotConnection = Services.RunService.RenderStepped:Connect(function()
+        if not Config.AimbotEnabled then return end
+        local targetPart = GetBestTarget()
+        if targetPart and Camera then
+            local camPos = Camera.CFrame.Position
+            local targetPos = targetPart.Position
+            local direction = (targetPos - camPos).Unit
+            local targetCF = CFrame.new(camPos, camPos + direction)
+            local alpha = math.min(1, Config.AimbotSmoothness * Config.AimbotStrength)
+            Camera.CFrame = Camera.CFrame:Lerp(targetCF, alpha)
         end
-        table.clear(DisabledParticles)
-    end
+    end)
 end
 
-local function ApplyRemoveShadows()
-    if Config.RemoveShadows then
-        Services.Lighting.GlobalShadows = false
+local function StopAimbot()
+    if AimbotConnection then AimbotConnection:Disconnect(); AimbotConnection = nil end
+end
+
+-- ================================ 无后坐力 ================================
+local function OnToolActivated()
+    RecoilOriginCF = Camera.CFrame
+    RecoilLockUntil = os.clock() + Config.RecoilLockDuration
+end
+
+local function StartRecoil()
+    if RecoilConnection then return end
+    RecoilConnection = Services.RunService.RenderStepped:Connect(function()
+        if not Config.NoRecoilEnabled then return end
+        if os.clock() < RecoilLockUntil then
+            Camera.CFrame = RecoilOriginCF
+        end
+    end)
+end
+
+local function StopRecoil()
+    if RecoilConnection then RecoilConnection:Disconnect(); RecoilConnection = nil end
+end
+
+local function SetupGlobalToolListener()
+    if not LocalPlayer.Character then return end
+    for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
+        if tool:IsA("Tool") then
+            if not tool:GetAttribute("RecoilTracked") then
+                tool:SetAttribute("RecoilTracked", true)
+                local conn = tool.Activated:Connect(OnToolActivated)
+                table.insert(Connections, conn)
+            end
+        end
+    end
+end
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    SetupGlobalToolListener()
+end)
+SetupGlobalToolListener()
+
+-- ================================ FOV 圈 UI ================================
+local function UpdateFOVCircle()
+    if not FovCircleFrame or not Camera then return end
+    if Config.FOVCircleEnabled then
+        local radius = (Camera.ViewportSize.Y / 2) * math.tan(math.rad(Config.FOVCircleAngle / 2)) / math.tan(math.rad(Camera.FieldOfView / 2))
+        FovCircleFrame.Size = UDim2.new(0, radius * 2, 0, radius * 2)
+        FovCircleFrame.Position = UDim2.new(0.5, -radius, 0.5, -radius)
+        FovCircleFrame.Visible = true
     else
-        Services.Lighting.GlobalShadows = true
+        FovCircleFrame.Visible = false
     end
 end
 
-local function ApplyOptimizations()
-    ApplyRemoveSmoke()
-    ApplyRemoveShadows()
+local function CreateFOVCircleUI()
+    if FovCircleGui then FovCircleGui:Destroy() end
+    FovCircleGui = Instance.new("ScreenGui")
+    FovCircleGui.Name = "FovCircleGui"
+    FovCircleGui.ResetOnSpawn = false
+    FovCircleGui.IgnoreGuiInset = true
+    FovCircleGui.DisplayOrder = Config.UiDisplayOrder - 1
+    pcall(function() FovCircleGui.Parent = Services.CoreGui end)
+    if not FovCircleGui.Parent then pcall(function() FovCircleGui.Parent = PlayerGui end) end
+
+    FovCircleFrame = Instance.new("Frame")
+    FovCircleFrame.Name = "FovCircle"
+    FovCircleFrame.Size = UDim2.new(0, 200, 0, 200)
+    FovCircleFrame.Position = UDim2.new(0.5, -100, 0.5, -100)
+    FovCircleFrame.BackgroundTransparency = 0.9
+    FovCircleFrame.BackgroundColor3 = Color3.new(1,1,1)
+    FovCircleFrame.BorderSizePixel = 0
+    FovCircleFrame.Visible = false
+    FovCircleFrame.Parent = FovCircleGui
+
+    local corner = Instance.new("UICorner", FovCircleFrame)
+    corner.CornerRadius = UDim.new(1, 0)
+    local stroke = Instance.new("UIStroke", FovCircleFrame)
+    stroke.Color = Color3.fromRGB(0, 255, 0)
+    stroke.Thickness = 2
+    stroke.Transparency = 0.5
 end
 
--- ================================ UI创建（窗口可折叠 + 内部折叠面板） ================================
+-- ================================ UI创建 ================================
 local function CreateMainUI()
     print("【杰森透视】创建界面")
     ScreenGui = Instance.new("ScreenGui")
@@ -431,7 +576,6 @@ local function CreateMainUI()
     MainCorner.CornerRadius = UDim.new(0, 10)
     MainCorner.Parent = MainFrame
 
-    -- 标题栏（拖动区域）
     local TitleBar = Instance.new("Frame")
     TitleBar.Size = UDim2.new(1, 0, 0, 45)
     TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
@@ -442,14 +586,13 @@ local function CreateMainUI()
     TitleLabel.Size = UDim2.new(1, -90, 1, 0)
     TitleLabel.Position = UDim2.new(0, 15, 0, 0)
     TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = "杰森透视 纯净版"
+    TitleLabel.Text = "杰森 透视+自瞄"
     TitleLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
     TitleLabel.TextSize = 14
     TitleLabel.Font = Enum.Font.GothamBold
     TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
     TitleLabel.Parent = TitleBar
 
-    -- 最小化按钮
     MinimizeBtn = Instance.new("TextButton")
     MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
     MinimizeBtn.Position = UDim2.new(1, -70, 0.5, -15)
@@ -485,7 +628,6 @@ local function CreateMainUI()
     ContentList.SortOrder = Enum.SortOrder.LayoutOrder
     ContentList.Padding = UDim.new(0, 6)
 
-    -- 折叠面板创建函数
     local function CreateFoldSection(title, buttonsData, defaultOpen)
         local Section = Instance.new("Frame")
         Section.Size = UDim2.new(1, 0, 0, 30)
@@ -588,21 +730,54 @@ local function CreateMainUI()
         end}
     }, true)
 
-    -- 其他选项
-    CreateFoldSection("⚙️ 其他选项", {
-        { text = Config.RemoveSmoke and "去除烟雾   : 开" or "去除烟雾   : 关", active = Config.RemoveSmoke, callback = function(btn)
-            Config.RemoveSmoke = not Config.RemoveSmoke
-            btn.Text = Config.RemoveSmoke and "去除烟雾   : 开" or "去除烟雾   : 关"
-            btn.BackgroundColor3 = Config.RemoveSmoke and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
-            ApplyRemoveSmoke()
+    -- 自瞄选项
+    CreateFoldSection("🎯 自动瞄准", {
+        { text = Config.AimbotEnabled and "自动瞄准   : 开" or "自动瞄准   : 关", active = Config.AimbotEnabled, callback = function(btn)
+            Config.AimbotEnabled = not Config.AimbotEnabled
+            btn.Text = Config.AimbotEnabled and "自动瞄准   : 开" or "自动瞄准   : 关"
+            btn.BackgroundColor3 = Config.AimbotEnabled and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+            if not Config.AimbotEnabled then StopAimbot() else StartAimbot() end
         end},
-        { text = Config.RemoveShadows and "移除阴影   : 开" or "移除阴影   : 关", active = Config.RemoveShadows, callback = function(btn)
-            Config.RemoveShadows = not Config.RemoveShadows
-            btn.Text = Config.RemoveShadows and "移除阴影   : 开" or "移除阴影   : 关"
-            btn.BackgroundColor3 = Config.RemoveShadows and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
-            ApplyRemoveShadows()
-        end}
-    }, false)
+        { text = "平滑度 " .. string.format("%.2f", Config.AimbotSmoothness) .. " [+]", active = false, callback = function(btn)
+            Config.AimbotSmoothness = math.min(1, Config.AimbotSmoothness + 0.02)
+            btn.Text = "平滑度 " .. string.format("%.2f", Config.AimbotSmoothness) .. " [+]"
+        end},
+        { text = "平滑度 " .. string.format("%.2f", Config.AimbotSmoothness) .. " [-]", active = false, callback = function(btn)
+            Config.AimbotSmoothness = math.max(0.01, Config.AimbotSmoothness - 0.02)
+            btn.Text = "平滑度 " .. string.format("%.2f", Config.AimbotSmoothness) .. " [-]"
+        end},
+        { text = "强度     " .. string.format("%.1f", Config.AimbotStrength) .. " [+]", active = false, callback = function(btn)
+            Config.AimbotStrength = math.min(5, Config.AimbotStrength + 0.1)
+            btn.Text = "强度     " .. string.format("%.1f", Config.AimbotStrength) .. " [+]"
+        end},
+        { text = "强度     " .. string.format("%.1f", Config.AimbotStrength) .. " [-]", active = false, callback = function(btn)
+            Config.AimbotStrength = math.max(0.1, Config.AimbotStrength - 0.1)
+            btn.Text = "强度     " .. string.format("%.1f", Config.AimbotStrength) .. " [-]"
+        end},
+        { text = "锁部位: " .. Config.AimbotTargetPart, active = false, callback = function(btn)
+            if Config.AimbotTargetPart == "Head" then Config.AimbotTargetPart = "Torso"
+            elseif Config.AimbotTargetPart == "Torso" then Config.AimbotTargetPart = "Legs"
+            else Config.AimbotTargetPart = "Head" end
+            btn.Text = "锁部位: " .. Config.AimbotTargetPart
+        end},
+        { text = Config.AimbotWallCheck and "穿墙瞄准   : 开" or "穿墙瞄准   : 关", active = Config.AimbotWallCheck, callback = function(btn)
+            Config.AimbotWallCheck = not Config.AimbotWallCheck
+            btn.Text = Config.AimbotWallCheck and "穿墙瞄准   : 开" or "穿墙瞄准   : 关"
+            btn.BackgroundColor3 = Config.AimbotWallCheck and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+        end},
+        { text = Config.NoRecoilEnabled and "无后坐力   : 开" or "无后坐力   : 关", active = Config.NoRecoilEnabled, callback = function(btn)
+            Config.NoRecoilEnabled = not Config.NoRecoilEnabled
+            btn.Text = Config.NoRecoilEnabled and "无后坐力   : 开" or "无后坐力   : 关"
+            btn.BackgroundColor3 = Config.NoRecoilEnabled and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+            if not Config.NoRecoilEnabled then StopRecoil() else StartRecoil() end
+        end},
+        { text = Config.FOVCircleEnabled and "FOV瞄准圈 : 开" or "FOV瞄准圈 : 关", active = Config.FOVCircleEnabled, callback = function(btn)
+            Config.FOVCircleEnabled = not Config.FOVCircleEnabled
+            btn.Text = Config.FOVCircleEnabled and "FOV瞄准圈 : 开" or "FOV瞄准圈 : 关"
+            btn.BackgroundColor3 = Config.FOVCircleEnabled and Color3.fromRGB(20,130,70) or Color3.fromRGB(130,30,30)
+            UpdateFOVCircle()
+        end},
+    }, true)
 
     -- 伤害跳字开关
     local DamageToggleFrame = Instance.new("Frame")
@@ -658,7 +833,6 @@ local function CreateMainUI()
     EmptyTipLabel.Visible = false
     EmptyTipLabel.Parent = PlayerListContainer
 
-    -- 统计信息
     local InfoFrame = Instance.new("Frame")
     InfoFrame.Size = UDim2.new(1, -10, 0, 36)
     InfoFrame.BackgroundTransparency = 1
@@ -686,7 +860,7 @@ local function CreateMainUI()
 
     MainFrame.Parent = ScreenGui
 
-    -- 可移动实现（整个窗口拖动）
+    -- 拖动窗口
     local dragging = false
     local dragStart, startPos = Vector2.new(), UDim2.new()
     TitleBar.InputBegan:Connect(function(input)
@@ -704,7 +878,7 @@ local function CreateMainUI()
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
 
-    -- 最小化/最大化切换
+    -- 最小化/最大化
     MinimizeBtn.MouseButton1Click:Connect(function()
         isMinimized = not isMinimized
         if isMinimized then
@@ -725,7 +899,7 @@ local function CreateMainUI()
 
     task.wait(0.5)
     ContentScroller.CanvasSize = UDim2.new(0,0,0, ContentList.AbsoluteContentSize.Y)
-    print("【杰森透视】UI创建完成")
+    print("【杰森】UI创建完成")
 end
 
 -- ================================ 清理旧实例 ================================
@@ -744,10 +918,10 @@ local function ClearOldInstance()
         pcall(function() tagData.Gui:Destroy() end)
     end
     table.clear(HeadTagCache)
-    for obj, _ in pairs(DisabledParticles) do
-        pcall(function() obj.Enabled = true end)
-    end
-    table.clear(DisabledParticles)
+    if AimbotConnection then AimbotConnection:Disconnect(); AimbotConnection = nil end
+    if RecoilConnection then RecoilConnection:Disconnect(); RecoilConnection = nil end
+    if FovCircleGui then pcall(function() FovCircleGui:Destroy() end) FovCircleGui = nil end
+    if FovCircleFrame then FovCircleFrame = nil end
 end
 ClearOldInstance()
 
@@ -820,7 +994,6 @@ end
 
 -- ================================ 杀手目标透视 ================================
 local function UpdateKillerTarget()
-    -- 清除所有角色上的杀手目标标记
     for _, plr in pairs(Services.Players:GetPlayers()) do
         if plr.Character and plr.Character:FindFirstChild("KillerTarget") then
             plr.Character.KillerTarget:Destroy()
@@ -828,7 +1001,6 @@ local function UpdateKillerTarget()
     end
     if not Config.ShowKillerTarget then return end
 
-    -- 寻找所有杀手
     for _, plr in pairs(Services.Players:GetPlayers()) do
         if plr == LocalPlayer then continue end
         local role = GetPlayerRoleAndWeapon(plr)
@@ -836,9 +1008,8 @@ local function UpdateKillerTarget()
             local killerRoot = plr.Character.HumanoidRootPart
             local killerHead = plr.Character:FindFirstChild("Head")
             local lookVector = killerHead and killerHead.CFrame.LookVector or killerRoot.CFrame.LookVector
-            -- 检查杀手前方最近的非杀手玩家
             local bestTarget = nil
-            local bestDot = 0.98 -- 近似准星角度
+            local bestDot = 0.98
             for _, targetPlr in pairs(Services.Players:GetPlayers()) do
                 if targetPlr ~= plr and targetPlr.Character and targetPlr.Character:FindFirstChild("HumanoidRootPart") then
                     local targetRoot = targetPlr.Character.HumanoidRootPart
@@ -851,7 +1022,6 @@ local function UpdateKillerTarget()
                 end
             end
             if bestTarget and bestTarget.Character then
-                -- 给目标添加红色高亮
                 local char = bestTarget.Character
                 local hl = char:FindFirstChild("KillerTarget")
                 if not hl then
@@ -864,7 +1034,7 @@ local function UpdateKillerTarget()
                     hl.FillTransparency = 0.5
                     hl.Parent = char
                 end
-                break -- 目前只标记一个杀手的目标（可扩展）
+                break
             end
         end
     end
@@ -872,8 +1042,8 @@ end
 
 -- ================================ 核心更新逻辑 ================================
 local function UpdateMainLogic()
-    ApplyOptimizations()
     UpdateKillerTarget()
+    UpdateFOVCircle()
 
     local statCount = { Killer = 0, Sheriff = 0, Giant = 0, Innocent = 0 }
     local allPlayers = Services.Players:GetPlayers()
@@ -898,7 +1068,6 @@ local function UpdateMainLogic()
             if card then card.Frame.Visible = false end
         end
 
-        -- 高亮
         local shouldHighlight = (Config.HighlightDanger and roleInfo.IsDanger) or (Config.HighlightSheriff and role == "Sheriff") or (Config.HighlightInnocent and role == "Innocent")
         if shouldHighlight and isAlive then
             pcall(function()
@@ -925,7 +1094,6 @@ local function UpdateMainLogic()
             end)
         end
 
-        -- 玩家卡片
         if not (Config.OnlyShowDanger and not roleInfo.IsDanger) then
             local card = CreatePlayerCard(player)
             card.Frame.Visible = true
@@ -950,7 +1118,6 @@ local function UpdateMainLogic()
             card.Frame.LayoutOrder = roleInfo.Priority * 1000 + math.floor(dist)
         end
 
-        -- 头顶武器标签
         local shouldShowTag = (role == "Killer" or role == "Sheriff") and isAlive and weapon
         if shouldShowTag then
             local tagData = HeadTagCache[player.UserId]
@@ -1040,18 +1207,7 @@ end))
 table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     table.clear(PlayerWeaponCache)
-end))
-
-table.insert(Connections, workspace.DescendantAdded:Connect(function(descendant)
-    if Config.RemoveSmoke and descendant:IsA("ParticleEmitter") then
-        local name = descendant.Name:lower()
-        if name:find("smoke") or name:find("fire") or name:find("explosion") or name:find("dust") then
-            if descendant.Enabled then
-                descendant.Enabled = false
-                DisabledParticles[descendant] = true
-            end
-        end
-    end
+    SetupGlobalToolListener() -- 重新绑定工具事件
 end))
 
 local lastUpdate = 0
@@ -1063,8 +1219,13 @@ MainLoop = Services.RunService.Heartbeat:Connect(function(deltaTime)
 end)
 
 CreateMainUI()
-ApplyRemoveShadows()
-print("【杰森透视】纯净版已启动")
+CreateFOVCircleUI()
+
+-- 启动自瞄与无后坐力
+if Config.AimbotEnabled then StartAimbot() end
+if Config.NoRecoilEnabled then StartRecoil() end
+
+print("【杰森透视+自瞄】已启动")
 
 end)
 
