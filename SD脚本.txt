@@ -1,0 +1,825 @@
+-- ==================== 加载 Fluent UI 库 ====================
+local Fluent
+local success, err = pcall(function()
+    Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+end)
+if not success or not Fluent then
+    warn("Fluent 加载失败: " .. tostring(err))
+    return
+end
+
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+-- ==================== 服务与变量 ====================
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==================== 移速功能 ====================
+local currentWalkSpeed = 16
+local function updateWalkSpeed()
+    local char = LocalPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid.WalkSpeed = currentWalkSpeed end
+    end
+end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    updateWalkSpeed()
+end)
+
+-- ==================== 去除恐怖音频 ====================
+local antiHorrorAudioEnabled = false
+local horrorAudioConnections = {}
+local mutedSounds = {}
+local horrorKeywords = {"scary", "horror", "scream", "jump", "fear", "terrify", "恐怖", "惊悚", "尖叫", "鬼"}
+
+local function isHorrorSound(sound)
+    if not sound:IsA("Sound") then return false end
+    if sound.Name == "SD_Music_1" or sound.Name == "SD_Music_2" or sound.Name == "SD_Music_3" or sound.Name == "SD_Music_4" then return false end
+    local lowerName = string.lower(sound.Name)
+    for _, kw in ipairs(horrorKeywords) do
+        if string.find(lowerName, kw) then return true end
+    end
+    return sound.Volume > 1
+end
+
+local function disableHorrorSound(sound)
+    if antiHorrorAudioEnabled and isHorrorSound(sound) then
+        if not mutedSounds[sound] then
+            mutedSounds[sound] = { Volume = sound.Volume, Playing = sound.Playing }
+        end
+        sound.Volume = 0
+        sound.Playing = false
+    end
+end
+
+local function restoreAllMutedSounds()
+    for sound, data in pairs(mutedSounds) do
+        if sound and sound.Parent then
+            sound.Volume = data.Volume
+            if data.Playing then pcall(function() sound:Play() end) end
+        end
+    end
+    mutedSounds = {}
+end
+
+local function toggleAntiHorrorAudio(state)
+    antiHorrorAudioEnabled = state
+    if state then
+        for _, obj in ipairs(Workspace:GetDescendants()) do disableHorrorSound(obj) end
+        for _, obj in ipairs(SoundService:GetDescendants()) do disableHorrorSound(obj) end
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do disableHorrorSound(obj) end
+        local connections = {}
+        table.insert(connections, Workspace.DescendantAdded:Connect(disableHorrorSound))
+        table.insert(connections, SoundService.DescendantAdded:Connect(disableHorrorSound))
+        table.insert(connections, ReplicatedStorage.DescendantAdded:Connect(disableHorrorSound))
+        horrorAudioConnections = connections
+    else
+        for _, conn in ipairs(horrorAudioConnections) do conn:Disconnect() end
+        horrorAudioConnections = {}
+        restoreAllMutedSounds()
+    end
+end
+
+-- ==================== 防踢预警 ====================
+local antiKickEnabled = false
+local antiKickHighlighted = {}
+local antiKickConnection = nil
+local antiKickKeywords = {"kick", "ban", "trap", "kill", "die", "lava", "void", "punish", "brick", "killbrick", "踢", "封禁", "陷阱", "死亡", "杀"}
+
+local function isSuspiciousPart(part)
+    if not part:IsA("BasePart") then return false end
+    local lowerName = string.lower(part.Name)
+    for _, kw in ipairs(antiKickKeywords) do
+        if string.find(lowerName, kw) then return true end
+    end
+    return part:FindFirstChildOfClass("ClickDetector") or part:FindFirstChildOfClass("ProximityPrompt")
+end
+
+local function applyAntiKickHighlight(part)
+    if antiKickHighlighted[part] or not isSuspiciousPart(part) then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AntiKick_Highlight"
+    highlight.Adornee = part
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+    highlight.OutlineTransparency = 0
+    highlight.Parent = part
+    antiKickHighlighted[part] = highlight
+end
+
+local function clearAllAntiKickHighlights()
+    for _, highlight in pairs(antiKickHighlighted) do highlight:Destroy() end
+    antiKickHighlighted = {}
+end
+
+local function toggleAntiKick(state)
+    antiKickEnabled = state
+    if state then
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then applyAntiKickHighlight(obj) end
+        end
+        antiKickConnection = Workspace.DescendantAdded:Connect(function(obj)
+            if antiKickEnabled and obj:IsA("BasePart") then
+                task.wait(0.1)
+                applyAntiKickHighlight(obj)
+            end
+        end)
+    else
+        if antiKickConnection then
+            antiKickConnection:Disconnect()
+            antiKickConnection = nil
+        end
+        clearAllAntiKickHighlights()
+    end
+end
+
+-- ==================== 透视功能 ====================
+local npcEspEnabled = false
+local npcNameEnabled = false
+local playerEspEnabled = false
+local playerNameEnabled = false
+local espObjects = {}
+
+local function removeESP(target)
+    if not target then return end
+    if espObjects[target] then
+        if target:FindFirstChild("ESP_Highlight") then target.ESP_Highlight:Destroy() end
+        local head = target:FindFirstChild("Head")
+        if head and head:FindFirstChild("ESP_Billboard") then head.ESP_Billboard:Destroy() end
+        espObjects[target] = nil
+    end
+end
+
+local function applyESP(character)
+    if not character or not character:IsA("Model") or character == LocalPlayer.Character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local head = character:FindFirstChild("Head")
+    if not humanoid or not head then return end
+    local isPlayer = Players:GetPlayerFromCharacter(character) ~= nil
+    local needHighlight = (isPlayer and playerEspEnabled) or (not isPlayer and npcEspEnabled)
+    local needName = (isPlayer and playerNameEnabled) or (not isPlayer and npcNameEnabled)
+    if not needHighlight and not needName then removeESP(character) return end
+    removeESP(character)
+    if needHighlight then
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ESP_Highlight"
+        highlight.Adornee = character
+        highlight.FillColor = isPlayer and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(0, 0, 255)
+        highlight.FillTransparency = 0.5
+        highlight.OutlineColor = isPlayer and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(0, 0, 255)
+        highlight.OutlineTransparency = 0
+        highlight.Parent = character
+    end
+    if needName then
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "ESP_Billboard"
+        billboard.Adornee = head
+        billboard.Size = UDim2.new(0, 100, 0, 30)
+        billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+        billboard.AlwaysOnTop = true
+        billboard.Parent = head
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.TextColor3 = isPlayer and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(0, 0, 255)
+        textLabel.TextStrokeTransparency = 0
+        textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        textLabel.Font = Enum.Font.GothamBold
+        textLabel.TextSize = 14
+        if isPlayer then
+            local player = Players:GetPlayerFromCharacter(character)
+            textLabel.Text = player.DisplayName .. " (@" .. player.Name .. ")"
+        else
+            textLabel.Text = "NPC"
+        end
+        textLabel.Parent = billboard
+    end
+    espObjects[character] = true
+end
+
+local function clearAllESP()
+    for character, _ in pairs(espObjects) do removeESP(character) end
+    espObjects = {}
+end
+
+local function scanAndApplyESP()
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then applyESP(obj) end
+    end
+end
+
+Workspace.ChildAdded:Connect(function(child)
+    if child:IsA("Model") and child:FindFirstChildOfClass("Humanoid") then
+        task.wait(0.1)
+        applyESP(child)
+    end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function(character)
+        task.wait(0.5)
+        applyESP(character)
+        character:WaitForChild("Humanoid").Died:Connect(function() removeESP(character) end)
+    end)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        player.CharacterAdded:Connect(function(character)
+            task.wait(0.5)
+            applyESP(character)
+            character:WaitForChild("Humanoid").Died:Connect(function() removeESP(character) end)
+        end)
+        if player.Character then
+            player.Character:WaitForChild("Humanoid").Died:Connect(function() removeESP(player.Character) end)
+        end
+    end
+end
+
+Workspace.ChildRemoved:Connect(function(child)
+    if espObjects[child] then espObjects[child] = nil end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        scanAndApplyESP()
+    end
+end)
+
+-- ==================== 密码扫描逻辑 ====================
+local function scanForPasswords()
+    local foundPasswords = {}
+    local keywords = {"password", "pass", "code", "key", "门", "密码", "锁", "解锁", "door"}
+    local function checkKeyword(text)
+        if not text then return false end
+        text = string.lower(tostring(text))
+        for _, kw in ipairs(keywords) do
+            if string.find(text, kw) then return true end
+        end
+        return false
+    end
+    local function scanObject(obj)
+        if not obj then return end
+        if obj:IsA("StringValue") or obj:IsA("NumberValue") then
+            if checkKeyword(obj.Name) or checkKeyword(obj.Value) then
+                table.insert(foundPasswords, "[" .. obj.ClassName .. "] " .. obj:GetFullName() .. " = " .. tostring(obj.Value))
+            end
+        end
+        if obj:IsA("TextLabel") or obj:IsA("TextBox") or obj:IsA("TextButton") then
+            if checkKeyword(obj.Name) or checkKeyword(obj.Text) then
+                table.insert(foundPasswords, "[" .. obj.ClassName .. "] " .. obj:GetFullName() .. " 内容: " .. tostring(obj.Text))
+            end
+        end
+    end
+    for _, obj in ipairs(Workspace:GetDescendants()) do scanObject(obj) end
+    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do scanObject(obj) end
+    return foundPasswords
+end
+
+-- ==================== 导航寻路 ====================
+for _, obj in ipairs(Workspace:GetChildren()) do
+    if obj.Name == "SD_NavLines" then obj:Destroy() end
+end
+local navFolder = Instance.new("Folder")
+navFolder.Name = "SD_NavLines"
+navFolder.Parent = Workspace
+local navTargets = {}
+local isNavigating = false
+local navTask = nil
+
+local function clearNavLines()
+    isNavigating = false
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name == "SD_NavLines" and obj:IsA("Folder") then obj:Destroy() end
+    end
+    navFolder = Instance.new("Folder")
+    navFolder.Name = "SD_NavLines"
+    navFolder.Parent = Workspace
+end
+
+local function drawLine(p1, p2)
+    if not navFolder or not navFolder.Parent then
+        navFolder = Instance.new("Folder")
+        navFolder.Name = "SD_NavLines"
+        navFolder.Parent = Workspace
+    end
+    local dist = (p2 - p1).Magnitude
+    if dist < 0.1 then return end
+    local part = Instance.new("Part")
+    part.Anchored = true
+    part.CanCollide = false
+    part.Material = Enum.Material.Neon
+    part.Color = Color3.fromRGB(255, 0, 0)
+    part.Transparency = 0.1
+    part.Size = Vector3.new(0.3, 0.3, dist)
+    part.CFrame = CFrame.new(p1, p2) * CFrame.new(0, 0, -dist/2)
+    part.Parent = navFolder
+end
+
+local function startNavigation(targetPart)
+    clearNavLines()
+    isNavigating = true
+    if navTask then task.cancel(navTask) end
+    navTask = task.spawn(function()
+        while isNavigating do
+            task.wait(0.5)
+            if not isNavigating then break end
+            local char = LocalPlayer.Character
+            if not char then break end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not humanoid then break end
+            if not targetPart or not targetPart.Parent then clearNavLines() break end
+            local distToTarget = (hrp.Position - targetPart.Position).Magnitude
+            if distToTarget < 10 then clearNavLines() break end
+            local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 5, AgentCanJump = true})
+            local success = pcall(function() path:ComputeAsync(hrp.Position, targetPart.Position) end)
+            if success and path.Status == Enum.PathStatus.Success then
+                if navFolder and navFolder.Parent then
+                    for _, part in ipairs(navFolder:GetChildren()) do part:Destroy() end
+                end
+                local waypoints = path:GetWaypoints()
+                for i = 1, #waypoints - 1 do
+                    drawLine(waypoints[i].Position + Vector3.new(0, 2, 0), waypoints[i+1].Position + Vector3.new(0, 2, 0))
+                end
+            else
+                if navFolder and navFolder.Parent then
+                    for _, part in ipairs(navFolder:GetChildren()) do part:Destroy() end
+                end
+                drawLine(hrp.Position + Vector3.new(0, 2, 0), targetPart.Position + Vector3.new(0, 2, 0))
+            end
+        end
+    end)
+end
+
+local function scanForInteractiveTeleports()
+    local results = {}
+    local keywords = {"door", "teleport", "portal", "exit", "传送", "门", "出口", "迷宫", "下一关", "next"}
+    local function hasKeyword(name)
+        name = string.lower(name)
+        for _, kw in ipairs(keywords) do
+            if string.find(name, kw) then return true end
+        end
+        return false
+    end
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local isInteractive = false
+            if hasKeyword(obj.Name) then isInteractive = true end
+            if obj:FindFirstChildOfClass("ClickDetector") or obj:FindFirstChildOfClass("ProximityPrompt") then isInteractive = true end
+            if isInteractive then table.insert(results, obj) end
+        end
+    end
+    return results
+end
+
+-- ==================== 夜视功能 ====================
+local nightVisionEnabled = false
+local nightVisionConnection = nil
+local defaultAmbient = Lighting.Ambient
+local defaultOutdoor = Lighting.OutdoorAmbient
+local ORARIO_NOTTE_INIZIO = 18
+local ORARIO_NOTTE_FINE = 6
+local nightVisionColor = Color3.fromRGB(255, 255, 255)
+
+local function startNightVision()
+    defaultAmbient = Lighting.Ambient
+    defaultOutdoor = Lighting.OutdoorAmbient
+    if nightVisionConnection then nightVisionConnection:Disconnect() end
+    nightVisionConnection = RunService.Heartbeat:Connect(function()
+        if not nightVisionEnabled then return end
+        local tempo = Lighting.ClockTime
+        if tempo >= ORARIO_NOTTE_INIZIO or tempo < ORARIO_NOTTE_FINE then
+            Lighting.Ambient = nightVisionColor
+            Lighting.OutdoorAmbient = nightVisionColor
+        else
+            Lighting.Ambient = defaultAmbient
+            Lighting.OutdoorAmbient = defaultOutdoor
+        end
+    end)
+end
+
+local function stopNightVision()
+    if nightVisionConnection then nightVisionConnection:Disconnect() nightVisionConnection = nil end
+    Lighting.Ambient = defaultAmbient
+    Lighting.OutdoorAmbient = defaultOutdoor
+end
+
+-- ==================== 防跳脸 ====================
+local antiJumpScareEnabled = false
+local jumpScareConnection
+local soundConnection
+
+local function cleanJumpScareModel(model)
+    if not model then return end
+    if model:IsA("Model") or model:IsA("BasePart") then
+        local char = LocalPlayer.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        if model:IsA("Model") then
+            local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+            if primary then
+                local dist = (hrp.Position - primary.Position).Magnitude
+                if dist < 20 and model ~= char and not model:IsDescendantOf(char) then model:Destroy() end
+            end
+        elseif model:IsA("BasePart") then
+            local dist = (hrp.Position - model.Position).Magnitude
+            if dist < 20 and model ~= char and not model:IsDescendantOf(char) then model:Destroy() end
+        end
+    end
+end
+
+local function toggleAntiJumpScare(state)
+    antiJumpScareEnabled = state
+    if state then
+        jumpScareConnection = Workspace.ChildAdded:Connect(function(child)
+            if antiJumpScareEnabled then
+                task.wait(0.1)
+                cleanJumpScareModel(child)
+            end
+        end)
+        local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+        PlayerGui.ChildAdded:Connect(function(child)
+            if antiJumpScareEnabled then
+                if child:IsA("ImageLabel") or child:IsA("Frame") or child:IsA("TextLabel") then
+                    if child.Size.X.Scale > 0.5 or child.Size.Y.Scale > 0.5 then
+                        if not child:IsDescendantOf(Fluent.GUI) then child.Visible = false end
+                    end
+                end
+                if child:IsA("ScreenGui") and child.Name ~= "Fluent" then child.Enabled = false end
+            end
+        end)
+        local function checkSound(sound)
+            if sound:IsA("Sound") and sound.Volume > 1 then sound.Volume = 0 end
+        end
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("Sound") then checkSound(obj) end
+        end
+        soundConnection = Workspace.DescendantAdded:Connect(function(desc)
+            if desc:IsA("Sound") and antiJumpScareEnabled then checkSound(desc) end
+        end)
+    else
+        if jumpScareConnection then jumpScareConnection:Disconnect() jumpScareConnection = nil end
+        if soundConnection then soundConnection:Disconnect() soundConnection = nil end
+    end
+end
+
+-- ==================== 音乐 ====================
+local musicSounds = {}
+local function createMusicSound(name, id)
+    local s = Instance.new("Sound")
+    s.Name = name
+    s.SoundId = "rbxassetid://" .. id
+    s.Volume = 0.5
+    s.Looped = true
+    s.Parent = SoundService
+    table.insert(musicSounds, s)
+    return s
+end
+local musicSound1 = createMusicSound("SD_Music_1", "103122660133514")
+local musicSound2 = createMusicSound("SD_Music_2", "137173091934040")
+local musicSound3 = createMusicSound("SD_Music_3", "88523902860927")
+local musicSound4 = createMusicSound("SD_Music_4", "120260326962280")
+local function stopAllMusic()
+    for _, s in ipairs(musicSounds) do s:Stop() end
+end
+
+-- ==================== 防Nextbot（修复悬空） ====================
+local nextbotConnection = nil
+local hitboxEnabled = false
+
+local function clearNextbot(model)
+    if model and model:IsA("Model") then
+        local name = string.lower(model.Name)
+        if string.find(name, "nextbot") or string.find(name, "next bot") then
+            for _, part in ipairs(model:GetDescendants()) do
+                if part:IsA("BasePart") then part.Position = Vector3.new(0, -5000, 0) end
+            end
+        end
+    end
+end
+
+local function scanForNextbots()
+    for _, obj in ipairs(Workspace:GetChildren()) do clearNextbot(obj) end
+end
+
+local function updateHitbox()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    if hitboxEnabled then
+        if not char:FindFirstChild("AntiNextbot_Hitbox") then
+            local hb = Instance.new("Part")
+            hb.Name = "AntiNextbot_Hitbox"
+            hb.Size = Vector3.new(6, 6, 6)
+            hb.Transparency = 1
+            hb.CanCollide = true
+            hb.Anchored = false
+            hb.Massless = true
+            hb.CFrame = hrp.CFrame
+            hb.Parent = char
+            
+            local weld = Instance.new("WeldConstraint")
+            weld.Part0 = hrp
+            weld.Part1 = hb
+            weld.Parent = hb
+        end
+    else
+        local hb = char:FindFirstChild("AntiNextbot_Hitbox")
+        if hb then hb:Destroy() end
+    end
+end
+
+-- ==================== 穿墙 ====================
+local noclipEnabled = false
+local noclipConnection = nil
+
+local function toggleNoclip(state)
+    noclipEnabled = state
+    if state then
+        if noclipConnection then noclipConnection:Disconnect() end
+        noclipConnection = RunService.Stepped:Connect(function()
+            local char = LocalPlayer.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then part.CanCollide = false end
+                end
+            end
+        end)
+    else
+        if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = true end
+            end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.CanCollide = false end
+        end
+    end
+end
+
+-- ==================== UI 汉化系统 ====================
+local translations = {
+    -- 关闭窗口对话框
+    ["Close"] = "关闭",
+    ["Are you sure you want to unload the interface?"] = "确定要卸载脚本界面吗？",
+    ["Yes"] = "确定",
+    ["No"] = "取消",
+
+    -- 通知与提示
+    ["Interface"] = "界面",
+    ["Callback error"] = "回调错误",
+    ["Press LeftControl to toggle the interface."] = "按 左Ctrl 键切换界面",
+    ["Press LeftControl to toggle the inteface."] = "按 左Ctrl 键切换界面",
+
+    -- SaveManager
+    ["Configuration"] = "配置",
+    ["Config Name"] = "配置名称",
+    ["Configs"] = "配置列表",
+    ["Save"] = "保存",
+    ["Load"] = "加载",
+    ["Delete"] = "删除",
+    ["Save Config"] = "保存配置",
+    ["Load Config"] = "加载配置",
+    ["Delete Config"] = "删除配置",
+
+    -- InterfaceManager
+    ["Interface Settings"] = "界面设置",
+    ["Theme"] = "主题",
+    ["Themes"] = "主题",
+    ["Transparency"] = "透明度",
+    ["Acrylic"] = "亚克力效果",
+    ["Keybind"] = "快捷键",
+}
+
+local function translateText(text)
+    if not text or text == "" then return nil end
+    -- 完全匹配
+    if translations[text] then return translations[text] end
+    -- 长句替换（例如通知里的 "Press X to toggle..."）
+    for eng, chn in pairs(translations) do
+        if #eng > 4 and string.find(text, eng, 1, true) then
+            return text:gsub(eng, chn)
+        end
+    end
+    return nil
+end
+
+local function translateGUI(parent)
+    if not parent then return end
+    for _, obj in ipairs(parent:GetDescendants()) do
+        pcall(function()
+            if obj:IsA("TextLabel") or obj:IsA("TextButton") then
+                local newText = translateText(obj.Text)
+                if newText then obj.Text = newText end
+            end
+            if obj:IsA("TextBox") then
+                local newPlaceholder = translateText(obj.PlaceholderText)
+                if newPlaceholder then obj.PlaceholderText = newPlaceholder end
+            end
+        end)
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        pcall(function()
+            if Fluent and Fluent.GUI then
+                translateGUI(Fluent.GUI)
+            end
+        end)
+    end
+end)
+
+-- ==================== 创建 Fluent 界面 ====================
+local Window = Fluent:CreateWindow({
+    Title = "SD Hub",
+    SubTitle = "by SD",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Visual = Window:AddTab({ Title = "视觉", Icon = "eye" }),
+    General = Window:AddTab({ Title = "通用", Icon = "settings" }),
+    Music = Window:AddTab({ Title = "音乐", Icon = "music" }),
+    Anti = Window:AddTab({ Title = "防护", Icon = "shield" }),
+    Nextbot = Window:AddTab({ Title = "防Nextbot", Icon = "crosshair" })
+}
+
+-- 视觉
+Tabs.Visual:AddToggle("NpcEsp", { Title = "NPC透视", Default = false }):OnChanged(function(value)
+    npcEspEnabled = value
+    clearAllESP()
+    scanAndApplyESP()
+end)
+Tabs.Visual:AddToggle("NpcName", { Title = "NPC名字", Default = false }):OnChanged(function(value)
+    npcNameEnabled = value
+    clearAllESP()
+    scanAndApplyESP()
+end)
+Tabs.Visual:AddToggle("PlayerEsp", { Title = "玩家透视", Default = false }):OnChanged(function(value)
+    playerEspEnabled = value
+    clearAllESP()
+    scanAndApplyESP()
+end)
+Tabs.Visual:AddToggle("PlayerName", { Title = "玩家名字", Default = false }):OnChanged(function(value)
+    playerNameEnabled = value
+    clearAllESP()
+    scanAndApplyESP()
+end)
+
+-- 通用
+Tabs.General:AddButton({ Title = "飞行", Description = "点击加载飞行脚本", Callback = function()
+    pcall(function()
+        loadstring(game:HttpGet("https://pastefy.app/tkHc58Wt/raw"))()
+        loadstring(game:HttpGet("https://pastefy.app/x3njskBM/raw"))()
+        loadstring(game:HttpGet("https://pastefy.app/UhJ0rIxD/raw"))()
+    end)
+end })
+
+Tabs.General:AddToggle("NightVision", { Title = "夜视", Default = false }):OnChanged(function(value)
+    nightVisionEnabled = value
+    if value then startNightVision() else stopNightVision() end
+end)
+
+Tabs.General:AddSlider("WalkSpeed", {
+    Title = "修改移速",
+    Description = "调整角色移动速度",
+    Default = 16,
+    Min = 1,
+    Max = 500,
+    Rounding = 1,
+    Callback = function(value)
+        currentWalkSpeed = value
+        updateWalkSpeed()
+    end
+})
+
+Tabs.General:AddToggle("AntiHorrorAudio", { Title = "去除恐怖音频", Default = false }):OnChanged(function(value)
+    toggleAntiHorrorAudio(value)
+end)
+
+Tabs.General:AddToggle("NoclipToggle", { Title = "穿墙", Default = false }):OnChanged(function(value)
+    toggleNoclip(value)
+end)
+
+Tabs.General:AddButton({ Title = "扫描密码", Description = "扫描全图查找包含密码关键词的对象", Callback = function()
+    local results = scanForPasswords()
+    if #results > 0 then
+        Fluent:Notify({
+            Title = "密码扫描结果",
+            Content = "找到 " .. #results .. " 个匹配项",
+            SubContent = table.concat(results, "\n"),
+            Duration = 15
+        })
+    else
+        Fluent:Notify({ Title = "密码扫描结果", Content = "未在当前地图找到包含密码关键词的内容。", Duration = 5 })
+    end
+end })
+
+Tabs.General:AddButton({ Title = "刷新导航列表", Description = "扫描地图中的交互点", Callback = function()
+    local targets = scanForInteractiveTeleports()
+    if #targets > 0 then
+        local list = {}
+        for i, part in ipairs(targets) do table.insert(list, part.Name) end
+        Fluent:Notify({ Title = "导航列表", Content = "找到 " .. #targets .. " 个交互点", SubContent = table.concat(list, "\n"), Duration = 10 })
+    else
+        Fluent:Notify({ Title = "导航列表", Content = "未找到交互点", Duration = 5 })
+    end
+end })
+
+-- 音乐
+Tabs.Music:AddToggle("Music1", { Title = "四凤版雨爱", Default = false }):OnChanged(function(value)
+    if value then stopAllMusic() musicSound1:Play() else musicSound1:Stop() end
+end)
+Tabs.Music:AddToggle("Music2", { Title = "皮条客小曲", Default = false }):OnChanged(function(value)
+    if value then stopAllMusic() musicSound2:Play() else musicSound2:Stop() end
+end)
+Tabs.Music:AddToggle("Music3", { Title = "Unhappy", Default = false }):OnChanged(function(value)
+    if value then stopAllMusic() musicSound3:Play() else musicSound3:Stop() end
+end)
+Tabs.Music:AddToggle("Music4", { Title = "讲解石", Default = false }):OnChanged(function(value)
+    if value then stopAllMusic() musicSound4:Play() else musicSound4:Stop() end
+end)
+
+-- 防护
+Tabs.Anti:AddToggle("AntiKick", { Title = "防踢预警", Description = "高亮疑似危险交互点", Default = false }):OnChanged(function(value)
+    toggleAntiKick(value)
+end)
+Tabs.Anti:AddToggle("AntiJumpScare", { Title = "防跳脸", Description = "拦截可疑图片和音频", Default = false }):OnChanged(function(value)
+    toggleAntiJumpScare(value)
+end)
+
+-- 防Nextbot
+Tabs.Nextbot:AddToggle("HitboxToggle", { Title = "开启玩家碰撞箱（不显示）", Default = false }):OnChanged(function(value)
+    hitboxEnabled = value
+    updateHitbox()
+    Fluent:Notify({ Title = "防Nextbot", Content = value and "碰撞箱已开启" or "碰撞箱已关闭" })
+end)
+
+Tabs.Nextbot:AddToggle("ClearNextbotToggle", { Title = "清除Nextbot（传送到虚空）", Default = false }):OnChanged(function(value)
+    if value then
+        scanForNextbots()
+        if nextbotConnection then nextbotConnection:Disconnect() end
+        nextbotConnection = Workspace.ChildAdded:Connect(function(child)
+            task.wait(0.5)
+            clearNextbot(child)
+        end)
+        Fluent:Notify({ Title = "防Nextbot", Content = "已开启Nextbot自动清除" })
+    else
+        if nextbotConnection then nextbotConnection:Disconnect() nextbotConnection = nil end
+        Fluent:Notify({ Title = "防Nextbot", Content = "已关闭Nextbot自动清除" })
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    updateHitbox()
+end)
+
+-- 清理
+local originalDestroy = Fluent.Destroy
+Fluent.Destroy = function(self)
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name == "SD_NavLines" then obj:Destroy() end
+    end
+    clearAllAntiKickHighlights()
+    if nightVisionConnection then nightVisionConnection:Disconnect() end
+    stopAllMusic()
+    if nextbotConnection then nextbotConnection:Disconnect() end
+    if noclipConnection then noclipConnection:Disconnect() end
+    originalDestroy(self)
+end
+
+-- 初始化
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("SDHub")
+SaveManager:SetFolder("SDHub/Configs")
+InterfaceManager:BuildInterfaceSection(Tabs.General)
+SaveManager:BuildConfigSection(Tabs.General)
+Window:SelectTab(1)
+Fluent:Notify({ Title = "SD Hub", Content = "脚本加载成功", SubContent = "按 " .. tostring(Window.MinimizeKey) .. " 最小化界面", Duration = 5 })
