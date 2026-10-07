@@ -288,7 +288,7 @@ local function scanForPasswords()
     return foundPasswords
 end
 
--- ==================== 导航寻路 ====================
+-- ==================== 导航寻路核心逻辑 ====================
 for _, obj in ipairs(Workspace:GetChildren()) do
     if obj.Name == "SD_NavLines" then obj:Destroy() end
 end
@@ -521,7 +521,6 @@ local function updateHitbox()
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    
     if hitboxEnabled then
         if not char:FindFirstChild("AntiNextbot_Hitbox") then
             local hb = Instance.new("Part")
@@ -533,7 +532,6 @@ local function updateHitbox()
             hb.Massless = true
             hb.CFrame = hrp.CFrame
             hb.Parent = char
-            
             local weld = Instance.new("WeldConstraint")
             weld.Part0 = hrp
             weld.Part1 = hb
@@ -574,80 +572,27 @@ local function toggleNoclip(state)
     end
 end
 
--- ==================== UI 汉化系统 ====================
+-- ==================== UI 汉化 ====================
 local translations = {
-    ["Close"] = "关闭",
-    ["Are you sure you want to unload the interface?"] = "确定要卸载脚本界面吗？",
-    ["Yes"] = "确定",
-    ["No"] = "取消",
-    ["Cancel"] = "取消",
-    ["Confirm"] = "确认",
-    ["Continue"] = "继续",
-    ["OK"] = "确定",
-    ["Interface"] = "界面",
-    ["Notification"] = "通知",
-    ["Callback error"] = "回调错误",
-    ["Press LeftControl to toggle the interface."] = "按 左Ctrl 键切换界面",
-    ["Press LeftControl to toggle the inteface."] = "按 左Ctrl 键切换界面",
-    ["Configuration"] = "配置",
-    ["Config"] = "配置",
-    ["Config Name"] = "配置名称",
-    ["Configs"] = "配置列表",
-    ["Save"] = "保存",
-    ["Load"] = "加载",
-    ["Delete"] = "删除",
-    ["Refresh"] = "刷新",
-    ["Save Config"] = "保存配置",
-    ["Load Config"] = "加载配置",
-    ["Delete Config"] = "删除配置",
-    ["Create new config"] = "创建新配置",
-    ["Save manager"] = "配置管理器",
-    ["No config selected"] = "未选择配置",
-    ["Current config"] = "当前配置",
-    ["Config saved!"] = "配置已保存！",
-    ["Config loaded!"] = "配置已加载！",
-    ["Config deleted!"] = "配置已删除！",
-    ["Interface Settings"] = "界面设置",
-    ["Interface manager"] = "界面管理器",
-    ["Interface Toggle"] = "界面开关",
-    ["UI Scale"] = "界面缩放",
-    ["Theme"] = "主题",
-    ["Themes"] = "主题",
-    ["Transparency"] = "透明度",
-    ["Acrylic"] = "亚克力效果",
-    ["Keybind"] = "快捷键",
-    ["Search"] = "搜索",
-    ["Search..."] = "搜索...",
-    ["Enabled"] = "已开启",
-    ["Disabled"] = "已关闭",
-    ["Enable"] = "开启",
-    ["Disable"] = "关闭",
-    ["On"] = "开",
-    ["Off"] = "关",
-    ["Apply"] = "应用",
-    ["Reset"] = "重置",
-    ["Default"] = "默认",
-    ["Custom"] = "自定义",
-    ["Import"] = "导入",
-    ["Export"] = "导出",
-    ["Rename"] = "重命名",
-    ["Edit"] = "编辑",
-    ["New"] = "新建",
-    ["Open"] = "打开",
-    ["Close Window"] = "关闭窗口",
-    ["Minimize"] = "最小化",
-    ["Maximize"] = "最大化",
-    ["Restore"] = "还原",
-    ["Exit"] = "退出",
-    ["Quit"] = "退出",
-    ["Back"] = "返回",
-    ["Next"] = "下一个",
-    ["Previous"] = "上一个",
-    ["Finish"] = "完成",
-    ["Done"] = "完成",
-    ["Submit"] = "提交",
-    ["Clear"] = "清除",
-    ["Clear All"] = "清除全部",
+    ["Close"] = "关闭", ["Yes"] = "确定", ["No"] = "取消", ["Cancel"] = "取消",
+    ["Confirm"] = "确认", ["OK"] = "确定", ["Interface"] = "界面", ["Notification"] = "通知",
+    ["Callback error"] = "回调错误", ["Configuration"] = "配置", ["Config"] = "配置",
+    ["Config Name"] = "配置名称", ["Configs"] = "配置列表", ["Save"] = "保存",
+    ["Load"] = "加载", ["Delete"] = "删除", ["Refresh"] = "刷新",
+    ["Save Config"] = "保存配置", ["Load Config"] = "加载配置", ["Delete Config"] = "删除配置",
+    ["Create new config"] = "创建新配置", ["Save manager"] = "配置管理器",
+    ["Interface Settings"] = "界面设置", ["Interface manager"] = "界面管理器",
+    ["Interface Toggle"] = "界面开关", ["UI Scale"] = "界面缩放",
+    ["Theme"] = "主题", ["Themes"] = "主题", ["Transparency"] = "透明度",
+    ["Acrylic"] = "亚克力效果", ["Keybind"] = "快捷键", ["Search"] = "搜索",
+    ["Search..."] = "搜索...", ["Enabled"] = "已开启", ["Disabled"] = "已关闭",
+    ["Enable"] = "开启", ["Disable"] = "关闭", ["On"] = "开", ["Off"] = "关",
+    ["Apply"] = "应用", ["Reset"] = "重置", ["Default"] = "默认", ["Custom"] = "自定义",
+    ["Import"] = "导入", ["Export"] = "导出", ["Rename"] = "重命名", ["Edit"] = "编辑",
+    ["New"] = "新建", ["Open"] = "打开", ["Minimize"] = "最小化", ["Maximize"] = "最大化",
+    ["Restore"] = "还原", ["Exit"] = "退出", ["Quit"] = "退出", ["Back"] = "返回",
+    ["Next"] = "下一个", ["Previous"] = "上一个", ["Finish"] = "完成", ["Done"] = "完成",
+    ["Submit"] = "提交", ["Clear"] = "清除", ["Clear All"] = "清除全部",
 }
 
 local function translateText(text)
@@ -683,9 +628,7 @@ task.spawn(function()
     while true do
         task.wait(0.2)
         pcall(function()
-            if Fluent and Fluent.GUI then
-                translateGUI(Fluent.GUI)
-            end
+            if Fluent and Fluent.GUI then translateGUI(Fluent.GUI) end
         end)
     end
 end)
@@ -704,12 +647,14 @@ local Window = Fluent:CreateWindow({
 local Tabs = {
     Visual = Window:AddTab({ Title = "视觉", Icon = "eye" }),
     General = Window:AddTab({ Title = "通用", Icon = "settings" }),
+    Navigate = Window:AddTab({ Title = "指向导航", Icon = "navigation" }),
+    Password = Window:AddTab({ Title = "查找密码", Icon = "key" }),
     Music = Window:AddTab({ Title = "音乐", Icon = "music" }),
     Anti = Window:AddTab({ Title = "防护", Icon = "shield" }),
     Nextbot = Window:AddTab({ Title = "防Nextbot", Icon = "crosshair" })
 }
 
--- ==================== 自定义最小化胶囊 UI ====================
+-- ==================== 自定义最小化胶囊 ====================
 local MiniGui = Instance.new("ScreenGui")
 MiniGui.Name = "SD_MiniGui"
 MiniGui.ResetOnSpawn = false
@@ -764,13 +709,11 @@ MiniBtn.BackgroundTransparency = 1
 MiniBtn.Text = ""
 MiniBtn.Parent = MiniFrame
 
--- 点击胶囊恢复窗口
 MiniBtn.MouseButton1Click:Connect(function()
     MiniFrame.Visible = false
-    Window:Minimize() -- 切换回窗口状态
+    Window:Minimize()
 end)
 
--- 覆盖 Fluent 的 Minimize 方法
 local originalMinimize = Window.Minimize
 Window.Minimize = function(self, ...)
     originalMinimize(self, ...)
@@ -803,7 +746,7 @@ Tabs.Visual:AddToggle("PlayerName", { Title = "玩家名字", Default = false })
     scanAndApplyESP()
 end)
 
--- ==================== 通用标签页 ====================
+-- ==================== 通用标签页（不含密码、不含导航） ====================
 Tabs.General:AddButton({ Title = "飞行", Description = "点击加载飞行脚本", Callback = function()
     pcall(function()
         loadstring(game:HttpGet("https://pastefy.app/tkHc58Wt/raw"))()
@@ -838,30 +781,285 @@ Tabs.General:AddToggle("NoclipToggle", { Title = "穿墙", Default = false }):On
     toggleNoclip(value)
 end)
 
-Tabs.General:AddButton({ Title = "扫描密码", Description = "扫描全图查找包含密码关键词的对象", Callback = function()
-    local results = scanForPasswords()
-    if #results > 0 then
-        Fluent:Notify({
-            Title = "密码扫描结果",
-            Content = "找到 " .. #results .. " 个匹配项",
-            SubContent = table.concat(results, "\n"),
-            Duration = 15
-        })
-    else
-        Fluent:Notify({ Title = "密码扫描结果", Content = "未在当前地图找到包含密码关键词的内容。", Duration = 5 })
-    end
-end })
+-- ==================== 指向导航标签页 ====================
+local navContainer = Instance.new("Frame")
+navContainer.Name = "NavContainer"
+navContainer.Size = UDim2.new(1, 0, 0, 430)
+navContainer.BackgroundTransparency = 1
+navContainer.Parent = Tabs.Navigate.Container
 
-Tabs.General:AddButton({ Title = "刷新导航列表", Description = "扫描地图中的交互点", Callback = function()
-    local targets = scanForInteractiveTeleports()
-    if #targets > 0 then
-        local list = {}
-        for i, part in ipairs(targets) do table.insert(list, part.Name) end
-        Fluent:Notify({ Title = "导航列表", Content = "找到 " .. #targets .. " 个交互点", SubContent = table.concat(list, "\n"), Duration = 10 })
-    else
-        Fluent:Notify({ Title = "导航列表", Content = "未找到交互点", Duration = 5 })
+local NavTitle = Instance.new("TextLabel")
+NavTitle.Size = UDim2.new(1, 0, 0, 24)
+NavTitle.Position = UDim2.new(0, 0, 0, 0)
+NavTitle.BackgroundTransparency = 1
+NavTitle.Text = "传送点 / 交互点"
+NavTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+NavTitle.TextSize = 16
+NavTitle.Font = Enum.Font.GothamBold
+NavTitle.TextXAlignment = Enum.TextXAlignment.Left
+NavTitle.Parent = navContainer
+
+local NavStatus = Instance.new("TextLabel")
+NavStatus.Size = UDim2.new(1, 0, 0, 18)
+NavStatus.Position = UDim2.new(0, 0, 0, 28)
+NavStatus.BackgroundTransparency = 1
+NavStatus.Text = "未选择目标"
+NavStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+NavStatus.TextSize = 12
+NavStatus.Font = Enum.Font.Gotham
+NavStatus.TextXAlignment = Enum.TextXAlignment.Left
+NavStatus.Parent = navContainer
+
+local NavRefreshBtn = Instance.new("TextButton")
+NavRefreshBtn.Size = UDim2.new(0, 90, 0, 26)
+NavRefreshBtn.Position = UDim2.new(0, 0, 0, 54)
+NavRefreshBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+NavRefreshBtn.BorderSizePixel = 0
+NavRefreshBtn.Text = "刷新列表"
+NavRefreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+NavRefreshBtn.TextSize = 12
+NavRefreshBtn.Font = Enum.Font.GothamBold
+NavRefreshBtn.Parent = navContainer
+
+local NavRefreshCorner = Instance.new("UICorner")
+NavRefreshCorner.CornerRadius = UDim.new(0, 6)
+NavRefreshCorner.Parent = NavRefreshBtn
+
+local NavStopBtn = Instance.new("TextButton")
+NavStopBtn.Size = UDim2.new(0, 90, 0, 26)
+NavStopBtn.Position = UDim2.new(0, 96, 0, 54)
+NavStopBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+NavStopBtn.BorderSizePixel = 0
+NavStopBtn.Text = "停止导航"
+NavStopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+NavStopBtn.TextSize = 12
+NavStopBtn.Font = Enum.Font.GothamBold
+NavStopBtn.Visible = false
+NavStopBtn.Parent = navContainer
+
+local NavStopCorner = Instance.new("UICorner")
+NavStopCorner.CornerRadius = UDim.new(0, 6)
+NavStopCorner.Parent = NavStopBtn
+
+local NavList = Instance.new("ScrollingFrame")
+NavList.Size = UDim2.new(1, 0, 1, -92)
+NavList.Position = UDim2.new(0, 0, 0, 90)
+NavList.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+NavList.BackgroundTransparency = 0.4
+NavList.BorderSizePixel = 0
+NavList.ScrollBarThickness = 4
+NavList.CanvasSize = UDim2.new(0, 0, 0, 0)
+NavList.Parent = navContainer
+
+local NavListCorner = Instance.new("UICorner")
+NavListCorner.CornerRadius = UDim.new(0, 6)
+NavListCorner.Parent = NavList
+
+local NavListLayout = Instance.new("UIListLayout")
+NavListLayout.Padding = UDim.new(0, 5)
+NavListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NavListLayout.Parent = NavList
+
+local function refreshNavList()
+    for _, child in ipairs(NavList:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
     end
-end })
+    navTargets = scanForInteractiveTeleports()
+    if #navTargets == 0 then
+        local emptyLabel = Instance.new("TextLabel")
+        emptyLabel.Size = UDim2.new(1, 0, 0, 30)
+        emptyLabel.BackgroundTransparency = 1
+        emptyLabel.Text = "未找到可交互的传送点或门。"
+        emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        emptyLabel.TextSize = 12
+        emptyLabel.Font = Enum.Font.Gotham
+        emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+        emptyLabel.Parent = NavList
+    else
+        for i, part in ipairs(navTargets) do
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, 0, 0, 35)
+            btn.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+            btn.BorderSizePixel = 0
+            btn.Text = ""
+            btn.LayoutOrder = i
+            btn.Parent = NavList
+
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 4)
+            btnCorner.Parent = btn
+
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(0.7, 0, 1, 0)
+            nameLabel.Position = UDim2.new(0, 10, 0, 0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.Text = part.Name
+            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            nameLabel.TextSize = 13
+            nameLabel.Font = Enum.Font.Gotham
+            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            nameLabel.Parent = btn
+
+            local distLabel = Instance.new("TextLabel")
+            distLabel.Size = UDim2.new(0.3, 0, 1, 0)
+            distLabel.Position = UDim2.new(0.7, 0, 0, 0)
+            distLabel.BackgroundTransparency = 1
+            distLabel.Text = "0m"
+            distLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+            distLabel.TextSize = 12
+            distLabel.Font = Enum.Font.Gotham
+            distLabel.TextXAlignment = Enum.TextXAlignment.Right
+            distLabel.Parent = btn
+
+            task.spawn(function()
+                while btn.Parent do
+                    task.wait(0.5)
+                    if part and part.Parent then
+                        local char = LocalPlayer.Character
+                        if char and char:FindFirstChild("HumanoidRootPart") then
+                            local dist = (char.HumanoidRootPart.Position - part.Position).Magnitude
+                            distLabel.Text = math.floor(dist) .. "m"
+                        end
+                    else
+                        break
+                    end
+                end
+            end)
+
+            btn.MouseButton1Click:Connect(function()
+                startNavigation(part)
+                NavStatus.Text = "正在导航到: " .. part.Name
+                NavStatus.TextColor3 = Color3.fromRGB(0, 255, 150)
+                NavStopBtn.Visible = true
+            end)
+        end
+    end
+    NavList.CanvasSize = UDim2.new(0, 0, 0, #navTargets * 40 + 10)
+end
+
+NavRefreshBtn.MouseButton1Click:Connect(function() refreshNavList() end)
+NavStopBtn.MouseButton1Click:Connect(function()
+    clearNavLines()
+    NavStatus.Text = "未选择目标"
+    NavStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+    NavStopBtn.Visible = false
+end)
+
+local function resetNavPanel()
+    clearNavLines()
+    NavStopBtn.Visible = false
+    NavStatus.Text = "未选择目标"
+    NavStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+end
+
+refreshNavList()
+
+-- ==================== 查找密码标签页（独立，还原原版布局） ====================
+local pwdContainer = Instance.new("Frame")
+pwdContainer.Name = "PwdContainer"
+pwdContainer.Size = UDim2.new(1, 0, 0, 430)
+pwdContainer.BackgroundTransparency = 1
+pwdContainer.Parent = Tabs.Password.Container
+
+local PwdTitle = Instance.new("TextLabel")
+PwdTitle.Size = UDim2.new(1, 0, 0, 24)
+PwdTitle.Position = UDim2.new(0, 0, 0, 0)
+PwdTitle.BackgroundTransparency = 1
+PwdTitle.Text = "密码扫描结果"
+PwdTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+PwdTitle.TextSize = 16
+PwdTitle.Font = Enum.Font.GothamBold
+PwdTitle.TextXAlignment = Enum.TextXAlignment.Left
+PwdTitle.Parent = pwdContainer
+
+local PwdScanBtn = Instance.new("TextButton")
+PwdScanBtn.Size = UDim2.new(0, 110, 0, 26)
+PwdScanBtn.Position = UDim2.new(0, 0, 0, 32)
+PwdScanBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
+PwdScanBtn.BorderSizePixel = 0
+PwdScanBtn.Text = "开始扫描"
+PwdScanBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+PwdScanBtn.TextSize = 13
+PwdScanBtn.Font = Enum.Font.GothamBold
+PwdScanBtn.Parent = pwdContainer
+
+local PwdScanCorner = Instance.new("UICorner")
+PwdScanCorner.CornerRadius = UDim.new(0, 6)
+PwdScanCorner.Parent = PwdScanBtn
+
+local PwdStatus = Instance.new("TextLabel")
+PwdStatus.Size = UDim2.new(1, -120, 0, 26)
+PwdStatus.Position = UDim2.new(0, 120, 0, 32)
+PwdStatus.BackgroundTransparency = 1
+PwdStatus.Text = "点击左侧按钮开始扫描"
+PwdStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+PwdStatus.TextSize = 12
+PwdStatus.Font = Enum.Font.Gotham
+PwdStatus.TextXAlignment = Enum.TextXAlignment.Left
+PwdStatus.Parent = pwdContainer
+
+local PwdOutput = Instance.new("ScrollingFrame")
+PwdOutput.Size = UDim2.new(1, 0, 1, -70)
+PwdOutput.Position = UDim2.new(0, 0, 0, 68)
+PwdOutput.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+PwdOutput.BackgroundTransparency = 0.4
+PwdOutput.BorderSizePixel = 0
+PwdOutput.ScrollBarThickness = 4
+PwdOutput.CanvasSize = UDim2.new(0, 0, 0, 0)
+PwdOutput.Parent = pwdContainer
+
+local PwdOutputCorner = Instance.new("UICorner")
+PwdOutputCorner.CornerRadius = UDim.new(0, 6)
+PwdOutputCorner.Parent = PwdOutput
+
+local PwdOutputLayout = Instance.new("UIListLayout")
+PwdOutputLayout.Padding = UDim.new(0, 5)
+PwdOutputLayout.SortOrder = Enum.SortOrder.LayoutOrder
+PwdOutputLayout.Parent = PwdOutput
+
+local function refreshCodeDisplay()
+    for _, child in ipairs(PwdOutput:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+    local results = scanForPasswords()
+    if #results == 0 then
+        local emptyLabel = Instance.new("TextLabel")
+        emptyLabel.Size = UDim2.new(1, 0, 0, 30)
+        emptyLabel.BackgroundTransparency = 1
+        emptyLabel.Text = "未在当前地图找到包含密码关键词的内容。"
+        emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+        emptyLabel.TextSize = 12
+        emptyLabel.Font = Enum.Font.Gotham
+        emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+        emptyLabel.Parent = PwdOutput
+        PwdStatus.Text = "未找到匹配项"
+        PwdStatus.TextColor3 = Color3.fromRGB(200, 100, 100)
+    else
+        for i, text in ipairs(results) do
+            local label = Instance.new("TextLabel")
+            label.Size = UDim2.new(1, 0, 0, 25)
+            label.BackgroundTransparency = 1
+            label.Text = "• " .. text
+            label.TextColor3 = Color3.fromRGB(0, 255, 150)
+            label.TextSize = 12
+            label.Font = Enum.Font.Code
+            label.TextXAlignment = Enum.TextXAlignment.Left
+            label.TextWrapped = true
+            label.LayoutOrder = i
+            label.Parent = PwdOutput
+        end
+        PwdStatus.Text = "找到 " .. #results .. " 个匹配项"
+        PwdStatus.TextColor3 = Color3.fromRGB(0, 255, 150)
+    end
+    PwdOutput.CanvasSize = UDim2.new(0, 0, 0, #results * 30 + 10)
+end
+
+PwdScanBtn.MouseButton1Click:Connect(function()
+    PwdStatus.Text = "扫描中..."
+    PwdStatus.TextColor3 = Color3.fromRGB(200, 200, 100)
+    task.wait(0.1)
+    refreshCodeDisplay()
+end)
 
 -- ==================== 音乐标签页 ====================
 Tabs.Music:AddToggle("Music1", { Title = "四凤版雨爱", Default = false }):OnChanged(function(value)
@@ -923,7 +1121,7 @@ Fluent.Destroy = function(self)
     stopAllMusic()
     if nextbotConnection then nextbotConnection:Disconnect() end
     if noclipConnection then noclipConnection:Disconnect() end
-    if MiniGui then MiniGui:Destroy() end -- 同时销毁自定义最小化 UI
+    if MiniGui then MiniGui:Destroy() end
     originalDestroy(self)
 end
 
