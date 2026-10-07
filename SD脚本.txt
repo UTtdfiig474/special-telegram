@@ -497,7 +497,7 @@ local function stopAllMusic()
     for _, s in ipairs(musicSounds) do s:Stop() end
 end
 
--- ==================== 防Nextbot（修复悬空） ====================
+-- ==================== 防Nextbot ====================
 local nextbotConnection = nil
 local hitboxEnabled = false
 
@@ -576,43 +576,83 @@ end
 
 -- ==================== UI 汉化系统 ====================
 local translations = {
-    -- 关闭窗口对话框
     ["Close"] = "关闭",
     ["Are you sure you want to unload the interface?"] = "确定要卸载脚本界面吗？",
     ["Yes"] = "确定",
     ["No"] = "取消",
-
-    -- 通知与提示
+    ["Cancel"] = "取消",
+    ["Confirm"] = "确认",
+    ["Continue"] = "继续",
+    ["OK"] = "确定",
     ["Interface"] = "界面",
+    ["Notification"] = "通知",
     ["Callback error"] = "回调错误",
     ["Press LeftControl to toggle the interface."] = "按 左Ctrl 键切换界面",
     ["Press LeftControl to toggle the inteface."] = "按 左Ctrl 键切换界面",
-
-    -- SaveManager
     ["Configuration"] = "配置",
+    ["Config"] = "配置",
     ["Config Name"] = "配置名称",
     ["Configs"] = "配置列表",
     ["Save"] = "保存",
     ["Load"] = "加载",
     ["Delete"] = "删除",
+    ["Refresh"] = "刷新",
     ["Save Config"] = "保存配置",
     ["Load Config"] = "加载配置",
     ["Delete Config"] = "删除配置",
-
-    -- InterfaceManager
+    ["Create new config"] = "创建新配置",
+    ["Save manager"] = "配置管理器",
+    ["No config selected"] = "未选择配置",
+    ["Current config"] = "当前配置",
+    ["Config saved!"] = "配置已保存！",
+    ["Config loaded!"] = "配置已加载！",
+    ["Config deleted!"] = "配置已删除！",
     ["Interface Settings"] = "界面设置",
+    ["Interface manager"] = "界面管理器",
+    ["Interface Toggle"] = "界面开关",
+    ["UI Scale"] = "界面缩放",
     ["Theme"] = "主题",
     ["Themes"] = "主题",
     ["Transparency"] = "透明度",
     ["Acrylic"] = "亚克力效果",
     ["Keybind"] = "快捷键",
+    ["Search"] = "搜索",
+    ["Search..."] = "搜索...",
+    ["Enabled"] = "已开启",
+    ["Disabled"] = "已关闭",
+    ["Enable"] = "开启",
+    ["Disable"] = "关闭",
+    ["On"] = "开",
+    ["Off"] = "关",
+    ["Apply"] = "应用",
+    ["Reset"] = "重置",
+    ["Default"] = "默认",
+    ["Custom"] = "自定义",
+    ["Import"] = "导入",
+    ["Export"] = "导出",
+    ["Rename"] = "重命名",
+    ["Edit"] = "编辑",
+    ["New"] = "新建",
+    ["Open"] = "打开",
+    ["Close Window"] = "关闭窗口",
+    ["Minimize"] = "最小化",
+    ["Maximize"] = "最大化",
+    ["Restore"] = "还原",
+    ["Exit"] = "退出",
+    ["Quit"] = "退出",
+    ["Back"] = "返回",
+    ["Next"] = "下一个",
+    ["Previous"] = "上一个",
+    ["Finish"] = "完成",
+    ["Done"] = "完成",
+    ["Submit"] = "提交",
+    ["Clear"] = "清除",
+    ["Clear All"] = "清除全部",
 }
 
 local function translateText(text)
     if not text or text == "" then return nil end
-    -- 完全匹配
     if translations[text] then return translations[text] end
-    -- 长句替换（例如通知里的 "Press X to toggle..."）
     for eng, chn in pairs(translations) do
         if #eng > 4 and string.find(text, eng, 1, true) then
             return text:gsub(eng, chn)
@@ -632,6 +672,8 @@ local function translateGUI(parent)
             if obj:IsA("TextBox") then
                 local newPlaceholder = translateText(obj.PlaceholderText)
                 if newPlaceholder then obj.PlaceholderText = newPlaceholder end
+                local newText = translateText(obj.Text)
+                if newText then obj.Text = newText end
             end
         end)
     end
@@ -639,7 +681,7 @@ end
 
 task.spawn(function()
     while true do
-        task.wait(0.3)
+        task.wait(0.2)
         pcall(function()
             if Fluent and Fluent.GUI then
                 translateGUI(Fluent.GUI)
@@ -667,7 +709,79 @@ local Tabs = {
     Nextbot = Window:AddTab({ Title = "防Nextbot", Icon = "crosshair" })
 }
 
--- 视觉
+-- ==================== 自定义最小化胶囊 UI ====================
+local MiniGui = Instance.new("ScreenGui")
+MiniGui.Name = "SD_MiniGui"
+MiniGui.ResetOnSpawn = false
+MiniGui.IgnoreGuiInset = true
+MiniGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local MiniFrame = Instance.new("Frame")
+MiniFrame.Name = "MiniFrame"
+MiniFrame.Size = UDim2.new(0, 180, 0, 36)
+MiniFrame.Position = UDim2.new(0.5, -90, 0, 20)
+MiniFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MiniFrame.BackgroundTransparency = 0.2
+MiniFrame.BorderSizePixel = 0
+MiniFrame.Active = true
+MiniFrame.Draggable = true
+MiniFrame.Visible = false
+MiniFrame.Parent = MiniGui
+
+local MiniCorner = Instance.new("UICorner")
+MiniCorner.CornerRadius = UDim.new(1, 0)
+MiniCorner.Parent = MiniFrame
+
+local MiniStroke = Instance.new("UIStroke")
+MiniStroke.Thickness = 2
+MiniStroke.Color = Color3.fromRGB(0, 170, 255)
+MiniStroke.Parent = MiniFrame
+
+local DragIcon = Instance.new("TextLabel")
+DragIcon.Size = UDim2.new(0, 30, 1, 0)
+DragIcon.Position = UDim2.new(0, 10, 0, 0)
+DragIcon.BackgroundTransparency = 1
+DragIcon.Text = "✥"
+DragIcon.TextColor3 = Color3.fromRGB(200, 200, 200)
+DragIcon.TextSize = 16
+DragIcon.Font = Enum.Font.GothamBold
+DragIcon.Parent = MiniFrame
+
+local MiniTitle = Instance.new("TextLabel")
+MiniTitle.Size = UDim2.new(1, -50, 1, 0)
+MiniTitle.Position = UDim2.new(0, 40, 0, 0)
+MiniTitle.BackgroundTransparency = 1
+MiniTitle.Text = "SD脚本"
+MiniTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+MiniTitle.TextSize = 14
+MiniTitle.Font = Enum.Font.GothamBold
+MiniTitle.TextXAlignment = Enum.TextXAlignment.Left
+MiniTitle.Parent = MiniFrame
+
+local MiniBtn = Instance.new("TextButton")
+MiniBtn.Size = UDim2.new(1, 0, 1, 0)
+MiniBtn.BackgroundTransparency = 1
+MiniBtn.Text = ""
+MiniBtn.Parent = MiniFrame
+
+-- 点击胶囊恢复窗口
+MiniBtn.MouseButton1Click:Connect(function()
+    MiniFrame.Visible = false
+    Window:Minimize() -- 切换回窗口状态
+end)
+
+-- 覆盖 Fluent 的 Minimize 方法
+local originalMinimize = Window.Minimize
+Window.Minimize = function(self, ...)
+    originalMinimize(self, ...)
+    if self.Minimized then
+        MiniFrame.Visible = true
+    else
+        MiniFrame.Visible = false
+    end
+end
+
+-- ==================== 视觉标签页 ====================
 Tabs.Visual:AddToggle("NpcEsp", { Title = "NPC透视", Default = false }):OnChanged(function(value)
     npcEspEnabled = value
     clearAllESP()
@@ -689,7 +803,7 @@ Tabs.Visual:AddToggle("PlayerName", { Title = "玩家名字", Default = false })
     scanAndApplyESP()
 end)
 
--- 通用
+-- ==================== 通用标签页 ====================
 Tabs.General:AddButton({ Title = "飞行", Description = "点击加载飞行脚本", Callback = function()
     pcall(function()
         loadstring(game:HttpGet("https://pastefy.app/tkHc58Wt/raw"))()
@@ -749,7 +863,7 @@ Tabs.General:AddButton({ Title = "刷新导航列表", Description = "扫描地�
     end
 end })
 
--- 音乐
+-- ==================== 音乐标签页 ====================
 Tabs.Music:AddToggle("Music1", { Title = "四凤版雨爱", Default = false }):OnChanged(function(value)
     if value then stopAllMusic() musicSound1:Play() else musicSound1:Stop() end
 end)
@@ -763,7 +877,7 @@ Tabs.Music:AddToggle("Music4", { Title = "讲解石", Default = false }):OnChang
     if value then stopAllMusic() musicSound4:Play() else musicSound4:Stop() end
 end)
 
--- 防护
+-- ==================== 防护标签页 ====================
 Tabs.Anti:AddToggle("AntiKick", { Title = "防踢预警", Description = "高亮疑似危险交互点", Default = false }):OnChanged(function(value)
     toggleAntiKick(value)
 end)
@@ -771,7 +885,7 @@ Tabs.Anti:AddToggle("AntiJumpScare", { Title = "防跳脸", Description = "拦�
     toggleAntiJumpScare(value)
 end)
 
--- 防Nextbot
+-- ==================== 防Nextbot标签页 ====================
 Tabs.Nextbot:AddToggle("HitboxToggle", { Title = "开启玩家碰撞箱（不显示）", Default = false }):OnChanged(function(value)
     hitboxEnabled = value
     updateHitbox()
@@ -798,7 +912,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     updateHitbox()
 end)
 
--- 清理
+-- ==================== 清理与初始化 ====================
 local originalDestroy = Fluent.Destroy
 Fluent.Destroy = function(self)
     for _, obj in ipairs(Workspace:GetChildren()) do
@@ -809,10 +923,10 @@ Fluent.Destroy = function(self)
     stopAllMusic()
     if nextbotConnection then nextbotConnection:Disconnect() end
     if noclipConnection then noclipConnection:Disconnect() end
+    if MiniGui then MiniGui:Destroy() end -- 同时销毁自定义最小化 UI
     originalDestroy(self)
 end
 
--- 初始化
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
