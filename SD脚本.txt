@@ -1,3 +1,4 @@
+-- ==================== 加载 Fluent UI 库 ====================
 local Fluent
 local success, err = pcall(function()
     Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -21,6 +22,58 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 local LocalPlayer = Players.LocalPlayer
 
+-- ==================== 跳脸预警提示 ====================
+local jumpScareWarnGui = Instance.new("ScreenGui")
+jumpScareWarnGui.Name = "SD_JumpScareWarn"
+jumpScareWarnGui.ResetOnSpawn = false
+jumpScareWarnGui.IgnoreGuiInset = true
+jumpScareWarnGui.DisplayOrder = 999
+jumpScareWarnGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local warnLabel = Instance.new("TextLabel")
+warnLabel.Size = UDim2.new(0, 600, 0, 60)
+warnLabel.Position = UDim2.new(0.5, -300, 0, 80)
+warnLabel.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+warnLabel.BackgroundTransparency = 0.25
+warnLabel.BorderSizePixel = 0
+warnLabel.Text = ""
+warnLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+warnLabel.TextSize = 24
+warnLabel.Font = Enum.Font.GothamBold
+warnLabel.TextStrokeTransparency = 0
+warnLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+warnLabel.Visible = false
+warnLabel.Parent = jumpScareWarnGui
+
+local warnCorner = Instance.new("UICorner")
+warnCorner.CornerRadius = UDim.new(0, 10)
+warnCorner.Parent = warnLabel
+
+local warnStroke = Instance.new("UIStroke")
+warnStroke.Thickness = 3
+warnStroke.Color = Color3.fromRGB(255, 50, 50)
+warnStroke.Parent = warnLabel
+
+local warnBlinkConnection = nil
+local function showJumpScareWarning()
+    warnLabel.Text = "预警：前方将触发跳脸！！！"
+    warnLabel.Visible = true
+    if warnBlinkConnection then warnBlinkConnection:Disconnect() end
+    local blink = true
+    warnBlinkConnection = RunService.RenderStepped:Connect(function()
+        if not warnLabel.Visible then return end
+        blink = not blink
+        warnLabel.TextColor3 = blink and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(255, 200, 0)
+    end)
+    task.delay(3, function()
+        warnLabel.Visible = false
+        if warnBlinkConnection then
+            warnBlinkConnection:Disconnect()
+            warnBlinkConnection = nil
+        end
+    end)
+end
+
 -- ==================== 移速功能 ====================
 local currentWalkSpeed = 16
 local function updateWalkSpeed()
@@ -32,7 +85,10 @@ local function updateWalkSpeed()
 end
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(1)
-    updateWalkSpeed()
+    -- 如果自由视角开着，就不恢复移速
+    if not freecamEnabled then
+        updateWalkSpeed()
+    end
 end)
 
 -- ==================== 拦截音乐（防跳脸时随机播放） ====================
@@ -95,57 +151,157 @@ local function loadRandomInterceptScript()
     end)
 end
 
--- ==================== 去除恐怖音频 ====================
+-- ==================== 去除恐怖音频（增强版） ====================
 local antiHorrorAudioEnabled = false
 local horrorAudioConnections = {}
 local mutedSounds = {}
-local horrorKeywords = {"scary", "horror", "scream", "jump", "fear", "terrify", "恐怖", "惊悚", "尖叫", "鬼"}
+local soundListeners = {}
+local horrorKeywords = {
+    "scary", "horror", "scream", "jump", "fear", "terrify", "creepy", "spooky",
+    "demon", "ghost", "monster", "zombie", "blood", "death", "kill", "evil",
+    "nightmare", "whisper", "distort", "haunt", "possess",
+    "恐怖", "惊悚", "尖叫", "鬼", "恶魔", "幽灵", "怪物", "僵尸", "血腥",
+    "死亡", "杀死", "邪恶", "噩梦", "低语", "失真", "吓"
+}
 
 local function isHorrorSound(sound)
-    if not sound:IsA("Sound") then return false end
-    if sound.Name == "SD_Music_1" or sound.Name == "SD_Music_2" or sound.Name == "SD_Music_3" or sound.Name == "SD_Music_4" or sound.Name == "SD_Music_5" then return false end
-    if string.sub(sound.Name, 1, 13) == "SD_Intercept_" then return false end
-    local lowerName = string.lower(sound.Name)
+    if not sound or not sound:IsA("Sound") then return false end
+    local n = sound.Name
+    if n == "SD_Music_1" or n == "SD_Music_3" or n == "SD_Music_4" or n == "SD_Music_5" then
+        return false
+    end
+    if string.sub(n, 1, 13) == "SD_Intercept_" then return false end
+    local lowerName = string.lower(n)
     for _, kw in ipairs(horrorKeywords) do
         if string.find(lowerName, kw) then return true end
     end
-    return sound.Volume > 1
+    if sound.Volume > 1 then return true end
+    return false
 end
 
 local function disableHorrorSound(sound)
-    if antiHorrorAudioEnabled and isHorrorSound(sound) then
-        if not mutedSounds[sound] then
-            mutedSounds[sound] = { Volume = sound.Volume, Playing = sound.Playing }
+    if not antiHorrorAudioEnabled then return end
+    if not sound or not sound:IsA("Sound") then return end
+    if not isHorrorSound(sound) then return end
+    if not mutedSounds[sound] then
+        mutedSounds[sound] = { Volume = sound.Volume, Playing = sound.Playing }
+    end
+    sound.Volume = 0
+    sound.Playing = false
+end
+
+local function attachSoundListener(sound)
+    if not sound or not sound:IsA("Sound") then return end
+    if soundListeners[sound] then return end
+    local conns = {}
+    table.insert(conns, sound:GetPropertyChangedSignal("Playing"):Connect(function()
+        if antiHorrorAudioEnabled and sound.Playing then
+            disableHorrorSound(sound)
         end
-        sound.Volume = 0
-        sound.Playing = false
+    end))
+    table.insert(conns, sound:GetPropertyChangedSignal("Volume"):Connect(function()
+        if antiHorrorAudioEnabled then
+            disableHorrorSound(sound)
+        end
+    end))
+    soundListeners[sound] = conns
+    if sound.Playing then
+        disableHorrorSound(sound)
+    end
+end
+
+local function detachSoundListener(sound)
+    if soundListeners[sound] then
+        for _, c in ipairs(soundListeners[sound]) do
+            pcall(function() c:Disconnect() end)
+        end
+        soundListeners[sound] = nil
     end
 end
 
 local function restoreAllMutedSounds()
     for sound, data in pairs(mutedSounds) do
         if sound and sound.Parent then
-            sound.Volume = data.Volume
-            if data.Playing then pcall(function() sound:Play() end) end
+            pcall(function()
+                sound.Volume = data.Volume
+                if data.Playing then sound:Play() end
+            end)
         end
     end
     mutedSounds = {}
 end
 
+local function detachAllListeners()
+    for sound, _ in pairs(soundListeners) do
+        detachSoundListener(sound)
+    end
+    soundListeners = {}
+end
+
 local function toggleAntiHorrorAudio(state)
     antiHorrorAudioEnabled = state
     if state then
-        for _, obj in ipairs(Workspace:GetDescendants()) do disableHorrorSound(obj) end
-        for _, obj in ipairs(SoundService:GetDescendants()) do disableHorrorSound(obj) end
-        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do disableHorrorSound(obj) end
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("Sound") then attachSoundListener(obj) disableHorrorSound(obj) end
+        end
+        for _, obj in ipairs(SoundService:GetDescendants()) do
+            if obj:IsA("Sound") then attachSoundListener(obj) disableHorrorSound(obj) end
+        end
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+            if obj:IsA("Sound") then attachSoundListener(obj) disableHorrorSound(obj) end
+        end
+
         local connections = {}
-        table.insert(connections, Workspace.DescendantAdded:Connect(disableHorrorSound))
-        table.insert(connections, SoundService.DescendantAdded:Connect(disableHorrorSound))
-        table.insert(connections, ReplicatedStorage.DescendantAdded:Connect(disableHorrorSound))
+        table.insert(connections, Workspace.DescendantAdded:Connect(function(desc)
+            if antiHorrorAudioEnabled and desc:IsA("Sound") then
+                attachSoundListener(desc)
+                disableHorrorSound(desc)
+            end
+        end))
+        table.insert(connections, SoundService.DescendantAdded:Connect(function(desc)
+            if antiHorrorAudioEnabled and desc:IsA("Sound") then
+                attachSoundListener(desc)
+                disableHorrorSound(desc)
+            end
+        end))
+        table.insert(connections, ReplicatedStorage.DescendantAdded:Connect(function(desc)
+            if antiHorrorAudioEnabled and desc:IsA("Sound") then
+                attachSoundListener(desc)
+                disableHorrorSound(desc)
+            end
+        end))
+        table.insert(connections, Workspace.DescendantRemoving:Connect(function(desc)
+            if desc:IsA("Sound") then
+                detachSoundListener(desc)
+                mutedSounds[desc] = nil
+            end
+        end))
         horrorAudioConnections = connections
+
+        task.spawn(function()
+            while antiHorrorAudioEnabled do
+                task.wait(1)
+                for _, obj in ipairs(Workspace:GetDescendants()) do
+                    if obj:IsA("Sound") then
+                        if not soundListeners[obj] then attachSoundListener(obj) end
+                        if obj.Playing then disableHorrorSound(obj) end
+                    end
+                end
+                for _, obj in ipairs(SoundService:GetDescendants()) do
+                    if obj:IsA("Sound") then
+                        if not soundListeners[obj] then attachSoundListener(obj) end
+                        if obj.Playing then disableHorrorSound(obj) end
+                    end
+                end
+            end
+        end)
+
     else
-        for _, conn in ipairs(horrorAudioConnections) do conn:Disconnect() end
+        for _, conn in ipairs(horrorAudioConnections) do
+            pcall(function() conn:Disconnect() end)
+        end
         horrorAudioConnections = {}
+        detachAllListeners()
         restoreAllMutedSounds()
     end
 end
@@ -369,6 +525,7 @@ local function clearNavLines()
     navFolder.Parent = Workspace
 end
 
+-- ==================== 导航红线绘制（透视+高光增强版） ====================
 local function drawLine(p1, p2)
     if not navFolder or not navFolder.Parent then
         navFolder = Instance.new("Folder")
@@ -377,15 +534,34 @@ local function drawLine(p1, p2)
     end
     local dist = (p2 - p1).Magnitude
     if dist < 0.1 then return end
+
     local part = Instance.new("Part")
     part.Anchored = true
     part.CanCollide = false
+    part.CanQuery = false
+    part.CanTouch = false
     part.Material = Enum.Material.Neon
-    part.Color = Color3.fromRGB(255, 0, 0)
-    part.Transparency = 0.1
-    part.Size = Vector3.new(0.3, 0.3, dist)
+    part.Color = Color3.fromRGB(255, 30, 30)
+    part.Transparency = 0
+    part.Size = Vector3.new(0.35, 0.35, dist)
     part.CFrame = CFrame.new(p1, p2) * CFrame.new(0, 0, -dist/2)
     part.Parent = navFolder
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "NavHighlight"
+    highlight.Adornee = part
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.FillTransparency = 0.7
+    highlight.OutlineColor = Color3.fromRGB(255, 100, 100)
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = part
+
+    local light = Instance.new("PointLight")
+    light.Color = Color3.fromRGB(255, 50, 50)
+    light.Brightness = 2
+    light.Range = 8
+    light.Parent = part
 end
 
 local function startNavigation(targetPart)
@@ -424,22 +600,45 @@ local function startNavigation(targetPart)
     end)
 end
 
+-- ==================== 扫描交互点（只保留成就/传送点） ====================
 local function scanForInteractiveTeleports()
     local results = {}
-    local keywords = {"door", "teleport", "portal", "exit", "传送", "门", "出口", "迷宫", "下一关", "next"}
-    local function hasKeyword(name)
+
+    local allowKeywords = {
+        "achievement", "achievements", "achievementpoint", "成就", "成就点",
+        "teleport", "teleportation", "传送", "传送点", "传送门", "portal", "warp",
+        "checkpoint", "检查点", "存档点", "savepoint",
+        "exit", "出口", "next", "下一关", "下一层", "关卡", "过关", "通关",
+        "level", "stage", "reward", "奖励"
+    }
+
+    local denyKeywords = {
+        "door", "门", "gate", "闸", "button", "按钮", "开关",
+        "trap", "陷阱", "lever", "拉杆", "switch", "brick"
+    }
+
+    local function hasAllowKeyword(name)
         name = string.lower(name)
-        for _, kw in ipairs(keywords) do
+        for _, kw in ipairs(allowKeywords) do
             if string.find(name, kw) then return true end
         end
         return false
     end
+
+    local function hasDenyKeyword(name)
+        name = string.lower(name)
+        for _, kw in ipairs(denyKeywords) do
+            if string.find(name, kw) then return true end
+        end
+        return false
+    end
+
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
-            local isInteractive = false
-            if hasKeyword(obj.Name) then isInteractive = true end
-            if obj:FindFirstChildOfClass("ClickDetector") or obj:FindFirstChildOfClass("ProximityPrompt") then isInteractive = true end
-            if isInteractive then table.insert(results, obj) end
+            local name = obj.Name
+            if hasAllowKeyword(name) and not hasDenyKeyword(name) then
+                table.insert(results, obj)
+            end
         end
     end
     return results
@@ -477,7 +676,7 @@ local function stopNightVision()
     Lighting.OutdoorAmbient = defaultOutdoor
 end
 
--- ==================== 防跳脸（带随机音乐 + 随机脚本） ====================
+-- ==================== 防跳脸（带预警提示 + 随机音乐 + 随机脚本） ====================
 local antiJumpScareEnabled = false
 local jumpScareConnection
 local soundConnection
@@ -495,6 +694,7 @@ local function cleanJumpScareModel(model)
                 local dist = (hrp.Position - primary.Position).Magnitude
                 if dist < 20 and model ~= char and not model:IsDescendantOf(char) then
                     model:Destroy()
+                    showJumpScareWarning()
                     playRandomInterceptMusic()
                     loadRandomInterceptScript()
                 end
@@ -503,6 +703,7 @@ local function cleanJumpScareModel(model)
             local dist = (hrp.Position - model.Position).Magnitude
             if dist < 20 and model ~= char and not model:IsDescendantOf(char) then
                 model:Destroy()
+                showJumpScareWarning()
                 playRandomInterceptMusic()
                 loadRandomInterceptScript()
             end
@@ -526,6 +727,7 @@ local function toggleAntiJumpScare(state)
                     if child.Size.X.Scale > 0.5 or child.Size.Y.Scale > 0.5 then
                         if not child:IsDescendantOf(Fluent.GUI) then
                             child.Visible = false
+                            showJumpScareWarning()
                             playRandomInterceptMusic()
                             loadRandomInterceptScript()
                         end
@@ -533,6 +735,7 @@ local function toggleAntiJumpScare(state)
                 end
                 if child:IsA("ScreenGui") and child.Name ~= "Fluent" then
                     child.Enabled = false
+                    showJumpScareWarning()
                     playRandomInterceptMusic()
                     loadRandomInterceptScript()
                 end
@@ -541,6 +744,7 @@ local function toggleAntiJumpScare(state)
         local function checkSound(sound)
             if sound:IsA("Sound") and sound.Volume > 1 then
                 sound.Volume = 0
+                showJumpScareWarning()
                 playRandomInterceptMusic()
                 loadRandomInterceptScript()
             end
@@ -570,10 +774,9 @@ local function createMusicSound(name, id)
     return s
 end
 local musicSound1 = createMusicSound("SD_Music_1", "103122660133514")
-local musicSound2 = createMusicSound("SD_Music_2", "137173091934040")
 local musicSound3 = createMusicSound("SD_Music_3", "88523902860927")
 local musicSound4 = createMusicSound("SD_Music_4", "120260326962280")
-local musicSound5 = createMusicSound("SD_Music_5", "104106837665968") -- 皇后大道东
+local musicSound5 = createMusicSound("SD_Music_5", "104106837665968")
 local function stopAllMusic()
     for _, s in ipairs(musicSounds) do s:Stop() end
 end
@@ -653,7 +856,7 @@ local function toggleNoclip(state)
     end
 end
 
--- ==================== 自由视角 ====================
+-- ==================== 自由视角（修复：禁用角色移动） ====================
 local freecamEnabled = false
 local freecamConnection = nil
 local freecamSpeed = 50
@@ -661,10 +864,41 @@ local freecamRotX, freecamRotY = 0, 0
 local freecamCamera = Workspace.CurrentCamera
 local originalCameraType = freecamCamera.CameraType
 local originalCameraCFrame = freecamCamera.CFrame
+local freecamSavedJumpPower = nil
+local freecamSavedJumpHeight = nil
+
+local function disableCharacterMovement()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    if freecamSavedJumpPower == nil then
+        freecamSavedJumpPower = humanoid.JumpPower
+        freecamSavedJumpHeight = humanoid.JumpHeight
+    end
+    humanoid.WalkSpeed = 0
+    humanoid.JumpPower = 0
+    humanoid.JumpHeight = 0
+end
+
+local function restoreCharacterMovement()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    humanoid.WalkSpeed = currentWalkSpeed
+    if freecamSavedJumpPower then humanoid.JumpPower = freecamSavedJumpPower end
+    if freecamSavedJumpHeight then humanoid.JumpHeight = freecamSavedJumpHeight end
+    freecamSavedJumpPower = nil
+    freecamSavedJumpHeight = nil
+end
 
 local function toggleFreecam(state)
     freecamEnabled = state
     if state then
+        -- 禁用角色移动（避免人物被 WASD 控制）
+        disableCharacterMovement()
+
         originalCameraType = freecamCamera.CameraType
         originalCameraCFrame = freecamCamera.CFrame
         freecamCamera.CameraType = Enum.CameraType.Scriptable
@@ -677,6 +911,15 @@ local function toggleFreecam(state)
             if UserInputService:GetFocusedTextBox() then return end
             local cam = Workspace.CurrentCamera
             if not cam then return end
+
+            -- 持续禁用角色移动（防止游戏内部重置）
+            local char = LocalPlayer.Character
+            if char then
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.WalkSpeed ~= 0 then
+                    humanoid.WalkSpeed = 0
+                end
+            end
 
             local moveDir = Vector3.new(0, 0, 0)
             local camCFrame = cam.CFrame
@@ -713,8 +956,19 @@ local function toggleFreecam(state)
         freecamCamera.CFrame = originalCameraCFrame
         UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         UserInputService.MouseIconEnabled = true
+
+        -- 恢复角色移动
+        restoreCharacterMovement()
     end
 end
+
+-- 角色重生时，如果自由视角还开着，重新禁用移动
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    if freecamEnabled then
+        disableCharacterMovement()
+    end
+end)
 
 -- ==================== UI 汉化 ====================
 local translations = {
@@ -798,7 +1052,7 @@ local Tabs = {
     Nextbot = Window:AddTab({ Title = "防Nextbot", Icon = "crosshair" })
 }
 
--- ==================== 自定义最小化胶囊（动态循环颜色） ====================
+-- ==================== 自定义最小化胶囊 ====================
 local MiniGui = Instance.new("ScreenGui")
 MiniGui.Name = "SD_MiniGui"
 MiniGui.ResetOnSpawn = false
@@ -941,7 +1195,9 @@ Tabs.General:AddSlider("WalkSpeed", {
     Rounding = 1,
     Callback = function(value)
         currentWalkSpeed = value
-        updateWalkSpeed()
+        if not freecamEnabled then
+            updateWalkSpeed()
+        end
     end
 })
 
@@ -957,7 +1213,9 @@ Tabs.General:AddInput("WalkSpeedInput", {
         if num then
             num = math.clamp(math.floor(num), 1, 500)
             currentWalkSpeed = num
-            updateWalkSpeed()
+            if not freecamEnabled then
+                updateWalkSpeed()
+            end
             if Fluent.Options and Fluent.Options.WalkSpeed then
                 pcall(function()
                     Fluent.Options.WalkSpeed:SetValue(num)
@@ -991,7 +1249,7 @@ local NavTitle = Instance.new("TextLabel")
 NavTitle.Size = UDim2.new(1, 0, 0, 24)
 NavTitle.Position = UDim2.new(0, 0, 0, 0)
 NavTitle.BackgroundTransparency = 1
-NavTitle.Text = "传送点 / 交互点"
+NavTitle.Text = "成就点 / 传送点"
 NavTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 NavTitle.TextSize = 16
 NavTitle.Font = Enum.Font.GothamBold
@@ -1068,7 +1326,7 @@ local function refreshNavList()
         local emptyLabel = Instance.new("TextLabel")
         emptyLabel.Size = UDim2.new(1, 0, 0, 30)
         emptyLabel.BackgroundTransparency = 1
-        emptyLabel.Text = "未找到可交互的传送点或门。"
+        emptyLabel.Text = "未找到成就点或传送点。"
         emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
         emptyLabel.TextSize = 12
         emptyLabel.Font = Enum.Font.Gotham
@@ -1264,9 +1522,6 @@ end)
 Tabs.Music:AddToggle("Music1", { Title = "四凤版雨爱", Default = false }):OnChanged(function(value)
     if value then stopAllMusic() musicSound1:Play() else musicSound1:Stop() end
 end)
-Tabs.Music:AddToggle("Music2", { Title = "皮条客小曲", Default = false }):OnChanged(function(value)
-    if value then stopAllMusic() musicSound2:Play() else musicSound2:Stop() end
-end)
 Tabs.Music:AddToggle("Music3", { Title = "Unhappy", Default = false }):OnChanged(function(value)
     if value then stopAllMusic() musicSound3:Play() else musicSound3:Stop() end
 end)
@@ -1325,6 +1580,9 @@ Fluent.Destroy = function(self)
     if nextbotConnection then nextbotConnection:Disconnect() end
     if noclipConnection then noclipConnection:Disconnect() end
     if freecamConnection then freecamConnection:Disconnect() end
+    detachAllListeners()
+    if warnBlinkConnection then warnBlinkConnection:Disconnect() end
+    if jumpScareWarnGui then jumpScareWarnGui:Destroy() end
     if MiniGui then MiniGui:Destroy() end
     originalDestroy(self)
 end
