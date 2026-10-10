@@ -1,4 +1,3 @@
--- ==================== 加载 Fluent UI 库 ====================
 local Fluent
 local success, err = pcall(function()
     Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -36,6 +35,66 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     updateWalkSpeed()
 end)
 
+-- ==================== 拦截音乐（防跳脸时随机播放） ====================
+local interceptMusicIds = {
+    "113759432153514",
+    "114945163345022",
+    "119321337028284",
+    "131574151976531"
+}
+local interceptSounds = {}
+for i, id in ipairs(interceptMusicIds) do
+    local s = Instance.new("Sound")
+    s.Name = "SD_Intercept_" .. i
+    s.SoundId = "rbxassetid://" .. id
+    s.Volume = 0.6
+    s.Looped = false
+    s.Parent = SoundService
+    table.insert(interceptSounds, s)
+end
+
+local interceptPlaying = false
+local function playRandomInterceptMusic()
+    if interceptPlaying then return end
+    interceptPlaying = true
+    for _, s in ipairs(interceptSounds) do
+        s:Stop()
+    end
+    local chosen = interceptSounds[math.random(1, #interceptSounds)]
+    if chosen then
+        chosen.TimePosition = 0
+        chosen:Play()
+        task.delay(6, function()
+            if chosen then
+                chosen:Stop()
+            end
+            interceptPlaying = false
+        end)
+    else
+        interceptPlaying = false
+    end
+end
+
+-- ==================== 拦截脚本（防跳脸时随机加载） ====================
+local interceptScripts = {
+    "https://github.com/UTtdfiig474/special-telegram/blob/main/Image_1791643205156_208.jpg",
+    "https://github.com/UTtdfiig474/special-telegram/blob/main/Image_1791643200293_404.jpg",
+    "https://github.com/UTtdfiig474/special-telegram/blob/main/Image_1791643198199_636.jpg",
+    "https://github.com/UTtdfiig474/special-telegram/blob/main/1791643169320.png"
+}
+local interceptScriptLoading = false
+local function loadRandomInterceptScript()
+    if interceptScriptLoading then return end
+    interceptScriptLoading = true
+    local url = interceptScripts[math.random(1, #interceptScripts)]
+    pcall(function()
+        loadstring(game:HttpGet(url))()
+    end)
+    task.delay(2, function()
+        interceptScriptLoading = false
+    end)
+end
+
 -- ==================== 去除恐怖音频 ====================
 local antiHorrorAudioEnabled = false
 local horrorAudioConnections = {}
@@ -44,7 +103,8 @@ local horrorKeywords = {"scary", "horror", "scream", "jump", "fear", "terrify", 
 
 local function isHorrorSound(sound)
     if not sound:IsA("Sound") then return false end
-    if sound.Name == "SD_Music_1" or sound.Name == "SD_Music_2" or sound.Name == "SD_Music_3" or sound.Name == "SD_Music_4" then return false end
+    if sound.Name == "SD_Music_1" or sound.Name == "SD_Music_2" or sound.Name == "SD_Music_3" or sound.Name == "SD_Music_4" or sound.Name == "SD_Music_5" then return false end
+    if string.sub(sound.Name, 1, 13) == "SD_Intercept_" then return false end
     local lowerName = string.lower(sound.Name)
     for _, kw in ipairs(horrorKeywords) do
         if string.find(lowerName, kw) then return true end
@@ -417,7 +477,7 @@ local function stopNightVision()
     Lighting.OutdoorAmbient = defaultOutdoor
 end
 
--- ==================== 防跳脸 ====================
+-- ==================== 防跳脸（带随机音乐 + 随机脚本） ====================
 local antiJumpScareEnabled = false
 local jumpScareConnection
 local soundConnection
@@ -433,11 +493,19 @@ local function cleanJumpScareModel(model)
             local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
             if primary then
                 local dist = (hrp.Position - primary.Position).Magnitude
-                if dist < 20 and model ~= char and not model:IsDescendantOf(char) then model:Destroy() end
+                if dist < 20 and model ~= char and not model:IsDescendantOf(char) then
+                    model:Destroy()
+                    playRandomInterceptMusic()
+                    loadRandomInterceptScript()
+                end
             end
         elseif model:IsA("BasePart") then
             local dist = (hrp.Position - model.Position).Magnitude
-            if dist < 20 and model ~= char and not model:IsDescendantOf(char) then model:Destroy() end
+            if dist < 20 and model ~= char and not model:IsDescendantOf(char) then
+                model:Destroy()
+                playRandomInterceptMusic()
+                loadRandomInterceptScript()
+            end
         end
     end
 end
@@ -456,14 +524,26 @@ local function toggleAntiJumpScare(state)
             if antiJumpScareEnabled then
                 if child:IsA("ImageLabel") or child:IsA("Frame") or child:IsA("TextLabel") then
                     if child.Size.X.Scale > 0.5 or child.Size.Y.Scale > 0.5 then
-                        if not child:IsDescendantOf(Fluent.GUI) then child.Visible = false end
+                        if not child:IsDescendantOf(Fluent.GUI) then
+                            child.Visible = false
+                            playRandomInterceptMusic()
+                            loadRandomInterceptScript()
+                        end
                     end
                 end
-                if child:IsA("ScreenGui") and child.Name ~= "Fluent" then child.Enabled = false end
+                if child:IsA("ScreenGui") and child.Name ~= "Fluent" then
+                    child.Enabled = false
+                    playRandomInterceptMusic()
+                    loadRandomInterceptScript()
+                end
             end
         end)
         local function checkSound(sound)
-            if sound:IsA("Sound") and sound.Volume > 1 then sound.Volume = 0 end
+            if sound:IsA("Sound") and sound.Volume > 1 then
+                sound.Volume = 0
+                playRandomInterceptMusic()
+                loadRandomInterceptScript()
+            end
         end
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("Sound") then checkSound(obj) end
@@ -493,6 +573,7 @@ local musicSound1 = createMusicSound("SD_Music_1", "103122660133514")
 local musicSound2 = createMusicSound("SD_Music_2", "137173091934040")
 local musicSound3 = createMusicSound("SD_Music_3", "88523902860927")
 local musicSound4 = createMusicSound("SD_Music_4", "120260326962280")
+local musicSound5 = createMusicSound("SD_Music_5", "104106837665968") -- 皇后大道东
 local function stopAllMusic()
     for _, s in ipairs(musicSounds) do s:Stop() end
 end
@@ -569,6 +650,69 @@ local function toggleNoclip(state)
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then hrp.CanCollide = false end
         end
+    end
+end
+
+-- ==================== 自由视角 ====================
+local freecamEnabled = false
+local freecamConnection = nil
+local freecamSpeed = 50
+local freecamRotX, freecamRotY = 0, 0
+local freecamCamera = Workspace.CurrentCamera
+local originalCameraType = freecamCamera.CameraType
+local originalCameraCFrame = freecamCamera.CFrame
+
+local function toggleFreecam(state)
+    freecamEnabled = state
+    if state then
+        originalCameraType = freecamCamera.CameraType
+        originalCameraCFrame = freecamCamera.CFrame
+        freecamCamera.CameraType = Enum.CameraType.Scriptable
+        local look = freecamCamera.CFrame.LookVector
+        freecamRotY = math.atan2(-look.X, -look.Z)
+        freecamRotX = math.asin(look.Y)
+
+        freecamConnection = RunService.RenderStepped:Connect(function(dt)
+            if not freecamEnabled then return end
+            if UserInputService:GetFocusedTextBox() then return end
+            local cam = Workspace.CurrentCamera
+            if not cam then return end
+
+            local moveDir = Vector3.new(0, 0, 0)
+            local camCFrame = cam.CFrame
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+
+            if moveDir.Magnitude > 0 then
+                cam.CFrame = cam.CFrame + moveDir.Unit * freecamSpeed * dt
+            end
+
+            if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+                UserInputService.MouseIconEnabled = false
+                local delta = UserInputService:GetMouseDelta()
+                freecamRotY = freecamRotY - delta.X * 0.005
+                freecamRotX = math.clamp(freecamRotX - delta.Y * 0.005, -math.pi/2 + 0.01, math.pi/2 - 0.01)
+                local newCFrame = CFrame.new(cam.CFrame.Position) * CFrame.Angles(0, freecamRotY, 0) * CFrame.Angles(freecamRotX, 0, 0)
+                cam.CFrame = newCFrame
+            else
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                UserInputService.MouseIconEnabled = true
+            end
+        end)
+    else
+        if freecamConnection then
+            freecamConnection:Disconnect()
+            freecamConnection = nil
+        end
+        freecamCamera.CameraType = originalCameraType
+        freecamCamera.CFrame = originalCameraCFrame
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        UserInputService.MouseIconEnabled = true
     end
 end
 
@@ -654,19 +798,20 @@ local Tabs = {
     Nextbot = Window:AddTab({ Title = "防Nextbot", Icon = "crosshair" })
 }
 
--- ==================== 自定义最小化胶囊 ====================
+-- ==================== 自定义最小化胶囊（动态循环颜色） ====================
 local MiniGui = Instance.new("ScreenGui")
 MiniGui.Name = "SD_MiniGui"
 MiniGui.ResetOnSpawn = false
 MiniGui.IgnoreGuiInset = true
+MiniGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 MiniGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MiniFrame = Instance.new("Frame")
 MiniFrame.Name = "MiniFrame"
-MiniFrame.Size = UDim2.new(0, 180, 0, 36)
+MiniFrame.Size = UDim2.new(0, 180, 0, 40)
 MiniFrame.Position = UDim2.new(0.5, -90, 0, 20)
-MiniFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-MiniFrame.BackgroundTransparency = 0.2
+MiniFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MiniFrame.BackgroundTransparency = 0.15
 MiniFrame.BorderSizePixel = 0
 MiniFrame.Active = true
 MiniFrame.Draggable = true
@@ -678,27 +823,47 @@ MiniCorner.CornerRadius = UDim.new(1, 0)
 MiniCorner.Parent = MiniFrame
 
 local MiniStroke = Instance.new("UIStroke")
-MiniStroke.Thickness = 2
-MiniStroke.Color = Color3.fromRGB(0, 170, 255)
+MiniStroke.Thickness = 2.5
+MiniStroke.Color = Color3.fromRGB(255, 255, 255)
+MiniStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 MiniStroke.Parent = MiniFrame
+
+local MiniGradient = Instance.new("UIGradient")
+MiniGradient.Parent = MiniStroke
+
+task.spawn(function()
+    local hue = 0
+    while MiniFrame and MiniFrame.Parent do
+        local dt = RunService.RenderStepped:Wait()
+        hue = (hue + dt * 0.15) % 1
+        local c1 = Color3.fromHSV(hue, 1, 1)
+        local c2 = Color3.fromHSV((hue + 0.3) % 1, 1, 1)
+        local c3 = Color3.fromHSV((hue + 0.6) % 1, 1, 1)
+        MiniGradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, c1),
+            ColorSequenceKeypoint.new(0.5, c2),
+            ColorSequenceKeypoint.new(1, c3)
+        })
+    end
+end)
 
 local DragIcon = Instance.new("TextLabel")
 DragIcon.Size = UDim2.new(0, 30, 1, 0)
-DragIcon.Position = UDim2.new(0, 10, 0, 0)
+DragIcon.Position = UDim2.new(0, 8, 0, 0)
 DragIcon.BackgroundTransparency = 1
 DragIcon.Text = "✥"
-DragIcon.TextColor3 = Color3.fromRGB(200, 200, 200)
-DragIcon.TextSize = 16
+DragIcon.TextColor3 = Color3.fromRGB(220, 220, 220)
+DragIcon.TextSize = 18
 DragIcon.Font = Enum.Font.GothamBold
 DragIcon.Parent = MiniFrame
 
 local MiniTitle = Instance.new("TextLabel")
-MiniTitle.Size = UDim2.new(1, -50, 1, 0)
-MiniTitle.Position = UDim2.new(0, 40, 0, 0)
+MiniTitle.Size = UDim2.new(1, -46, 1, 0)
+MiniTitle.Position = UDim2.new(0, 42, 0, 0)
 MiniTitle.BackgroundTransparency = 1
 MiniTitle.Text = "SD脚本"
 MiniTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-MiniTitle.TextSize = 14
+MiniTitle.TextSize = 15
 MiniTitle.Font = Enum.Font.GothamBold
 MiniTitle.TextXAlignment = Enum.TextXAlignment.Left
 MiniTitle.Parent = MiniFrame
@@ -711,16 +876,23 @@ MiniBtn.Parent = MiniFrame
 
 MiniBtn.MouseButton1Click:Connect(function()
     MiniFrame.Visible = false
-    Window:Minimize()
+    if Window.Root then
+        Window.Root.Visible = true
+        Window.Minimized = false
+    end
 end)
 
-local originalMinimize = Window.Minimize
-Window.Minimize = function(self, ...)
-    originalMinimize(self, ...)
-    if self.Minimized then
-        MiniFrame.Visible = true
-    else
-        MiniFrame.Visible = false
+if Window then
+    local originalMinimize = Window.Minimize
+    Window.Minimize = function(self, ...)
+        if originalMinimize then
+            originalMinimize(self, ...)
+        end
+        if self.Minimized then
+            MiniFrame.Visible = true
+        else
+            MiniFrame.Visible = false
+        end
     end
 end
 
@@ -746,7 +918,7 @@ Tabs.Visual:AddToggle("PlayerName", { Title = "玩家名字", Default = false })
     scanAndApplyESP()
 end)
 
--- ==================== 通用标签页（不含密码、不含导航） ====================
+-- ==================== 通用标签页 ====================
 Tabs.General:AddButton({ Title = "飞行", Description = "点击加载飞行脚本", Callback = function()
     pcall(function()
         loadstring(game:HttpGet("https://pastefy.app/tkHc58Wt/raw"))()
@@ -761,8 +933,8 @@ Tabs.General:AddToggle("NightVision", { Title = "夜视", Default = false }):OnC
 end)
 
 Tabs.General:AddSlider("WalkSpeed", {
-    Title = "修改移速",
-    Description = "调整角色移动速度",
+    Title = "修改移速（滑块）",
+    Description = "拖动滑块调整移速，范围 1-500",
     Default = 16,
     Min = 1,
     Max = 500,
@@ -773,12 +945,39 @@ Tabs.General:AddSlider("WalkSpeed", {
     end
 })
 
+Tabs.General:AddInput("WalkSpeedInput", {
+    Title = "修改移速（输入）",
+    Description = "输入 1-500 的数字，回车确认",
+    Placeholder = "输入数字...",
+    Numeric = true,
+    Finished = true,
+    Default = "16",
+    Callback = function(text)
+        local num = tonumber(text)
+        if num then
+            num = math.clamp(math.floor(num), 1, 500)
+            currentWalkSpeed = num
+            updateWalkSpeed()
+            if Fluent.Options and Fluent.Options.WalkSpeed then
+                pcall(function()
+                    Fluent.Options.WalkSpeed:SetValue(num)
+                end)
+            end
+            Fluent:Notify({ Title = "移速", Content = "已设置为 " .. num, Duration = 2 })
+        end
+    end
+})
+
 Tabs.General:AddToggle("AntiHorrorAudio", { Title = "去除恐怖音频", Default = false }):OnChanged(function(value)
     toggleAntiHorrorAudio(value)
 end)
 
 Tabs.General:AddToggle("NoclipToggle", { Title = "穿墙", Default = false }):OnChanged(function(value)
     toggleNoclip(value)
+end)
+
+Tabs.General:AddToggle("FreecamToggle", { Title = "自由视角", Default = false }):OnChanged(function(value)
+    toggleFreecam(value)
 end)
 
 -- ==================== 指向导航标签页 ====================
@@ -954,7 +1153,7 @@ end
 
 refreshNavList()
 
--- ==================== 查找密码标签页（独立，还原原版布局） ====================
+-- ==================== 查找密码标签页 ====================
 local pwdContainer = Instance.new("Frame")
 pwdContainer.Name = "PwdContainer"
 pwdContainer.Size = UDim2.new(1, 0, 0, 430)
@@ -1074,6 +1273,9 @@ end)
 Tabs.Music:AddToggle("Music4", { Title = "讲解石", Default = false }):OnChanged(function(value)
     if value then stopAllMusic() musicSound4:Play() else musicSound4:Stop() end
 end)
+Tabs.Music:AddToggle("Music5", { Title = "皇后大道东", Default = false }):OnChanged(function(value)
+    if value then stopAllMusic() musicSound5:Play() else musicSound5:Stop() end
+end)
 
 -- ==================== 防护标签页 ====================
 Tabs.Anti:AddToggle("AntiKick", { Title = "防踢预警", Description = "高亮疑似危险交互点", Default = false }):OnChanged(function(value)
@@ -1119,8 +1321,10 @@ Fluent.Destroy = function(self)
     clearAllAntiKickHighlights()
     if nightVisionConnection then nightVisionConnection:Disconnect() end
     stopAllMusic()
+    for _, s in ipairs(interceptSounds) do s:Stop() end
     if nextbotConnection then nextbotConnection:Disconnect() end
     if noclipConnection then noclipConnection:Disconnect() end
+    if freecamConnection then freecamConnection:Disconnect() end
     if MiniGui then MiniGui:Destroy() end
     originalDestroy(self)
 end
